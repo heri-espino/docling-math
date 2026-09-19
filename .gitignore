@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Environments
+.venv/
+venv/
+.env
+.conda/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime-generated corpus outputs in this tool repository
+bib/extracted/
+bib/references/
+bib/assets/
+bib/.backups/
+
+# Temporary files
+*.tmp

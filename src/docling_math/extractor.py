@@ -1,69 +1,14 @@
-#!/usr/bin/env python3
-"""
-CMAT — high-fidelity, token-efficient academic PDF extraction with Docling.
+"""High-fidelity academic PDF extraction built on Docling.
 
-Design goal
-===========
-Spend computation once so Codex/ChatGPT can spend fewer context tokens later.
+Default profile
+---------------
+- text-first Markdown
+- CodeFormulaV2 formula enrichment
+- TableFormer ACCURATE table reconstruction
+- compact page provenance markers
+- no persisted image assets unless --assets is requested
 
-Final corpus
-------------
-Bib/
-├── INDEX.md
-├── AGENTS.md                     # retrieval policy for coding/agent workflows
-├── pdf/                          # source of truth
-│   └── *.pdf
-├── extracted/                    # primary searchable corpus
-│   └── *.md
-├── references/                   # excluded from normal search unless needed
-│   └── *.references.md
-└── assets/                       # binary fallback, almost zero context cost until opened
-    └── <paper_id>/
-        ├── tables/               # ALL detected tables, as PNG
-        └── figures/              # filtered informative pictures, as PNG
-
-What the script does
---------------------
-* Uses a high-accuracy layout model (Egret Large by default).
-* Uses TableFormer ACCURATE for every paper.
-* Uses CodeFormulaV2 formula enrichment for every paper.
-* Uses picture classification for every paper.
-* By default runs TWO candidates for every PDF:
-      1) hybrid/native + OCR
-      2) forced full-page OCR
-  It scores both automatically and keeps only the better representation.
-* Does NOT keep page PNGs, JSON, HTML, CSV, or alternate raw Markdown.
-* Keeps the original PDF as the ultimate source of truth.
-* Keeps every table crop as PNG.
-* Keeps only likely informative figures using captions, Docling's picture classifier,
-  normalized geometry, first-page/margin heuristics, and duplicate-image detection.
-* Separates a late References/Bibliography section into Bib/references/ so normal
-  repository searches do not repeatedly retrieve citation lists.
-* Adds compact page markers (<!-- p:N -->) and asset paths to the Markdown.
-* Updates only the relevant paper block in Bib/INDEX.md and backs INDEX.md up once.
-* Creates Bib/AGENTS.md only if it does not already exist.
-
-Recommended first run
----------------------
-    python scripts/extract_bibliography_token_efficient.py --force
-
-One paper
----------
-    python scripts/extract_bibliography_token_efficient.py --paper paloyo --force
-
-Dependencies
-------------
-    pip install -U "docling[rapidocr]" pillow
-
-GPU
----
-The default is CUDA + RapidOCR torch backend. If CUDA is unavailable:
-    python scripts/extract_bibliography_token_efficient.py --device auto
-
-Notes
------
-The default strategy is deliberately compute-heavy ("compare") because extraction time
-is treated as cheap, while downstream context tokens are treated as expensive.
+The original PDFs remain the source of truth.
 """
 
 from __future__ import annotations
@@ -123,7 +68,7 @@ DEFAULT_MIN_FIGURE_AREA = 0.004       # 0.4% of a page
 DEFAULT_SMALL_MARGIN_AREA = 0.025     # 2.5% of a page
 DEFAULT_FIRST_PAGE_SMALL_AREA = 0.06  # 6% of a page
 
-# A late section matching one of these headings is moved to Bib/references/.
+# A late section matching one of these headings is moved to bib/references/.
 REFERENCE_HEADINGS = {
     "references",
     "bibliography",
@@ -230,31 +175,36 @@ class AssetStats:
 
 
 def discover_repo_root() -> Path:
+    """Find the nearest project containing bib/pdf (case-insensitive Bib)."""
     cwd = Path.cwd().resolve()
-    candidates = [
-        cwd,
-        cwd.parent,
-        cwd.parent.parent,
-        cwd.parent.parent.parent,
-        Path.home() / "projects" / "CMAT2",
-    ]
+    candidates = [cwd, *cwd.parents]
     for candidate in candidates:
-        if (candidate / "Bib" / "pdf").is_dir():
-            return candidate
+        for bib_name in ("bib", "Bib"):
+            if (candidate / bib_name / "pdf").is_dir():
+                return candidate
     raise FileNotFoundError(
-        "No pude localizar la raíz del repo CMAT2. Ejecuta el script desde el repo "
-        "o usa --repo /ruta/al/repo."
+        "No pude localizar bib/pdf. Ejecuta docling-math dentro del proyecto "
+        "o usa --repo /ruta/al/proyecto."
     )
+
+
+def resolve_bib_dir(repo: Path) -> Path:
+    for name in ("bib", "Bib"):
+        candidate = repo / name
+        if candidate.is_dir():
+            return candidate
+    return repo / "bib"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
+        prog="docling-math",
         description=(
-            "Convierte Bib/pdf a un corpus Markdown de alta fidelidad y bajo costo "
-            "de contexto, con assets visuales selectivos."
-        )
+            "Extrae papers PDF a Markdown de alta fidelidad. "
+            "Por defecto prioriza texto, matemáticas y tablas, sin guardar imágenes."
+        ),
     )
-    parser.add_argument("--repo", type=Path, default=None, help="Raíz de CMAT2.")
+    parser.add_argument("--repo", type=Path, default=None, help="Raíz del proyecto.")
     parser.add_argument(
         "--paper",
         type=str,
@@ -266,75 +216,119 @@ def parse_args() -> argparse.Namespace:
         choices=("compare", "smart", "hybrid", "ocr"),
         default=DEFAULT_STRATEGY,
         help=(
-            "compare (default): procesa hybrid y full-page OCR y elige; "
-            "smart: hybrid primero y OCR sólo si hay señales de mala extracción; "
-            "hybrid: nunca fuerza OCR; ocr: siempre full-page OCR."
+            "compare: compara hybrid y full-page OCR; smart: OCR sólo si hace falta; "
+            "hybrid: no fuerza OCR; ocr: full-page OCR."
         ),
     )
     parser.add_argument(
         "--device",
-        choices=("cuda", "auto", "cpu", "mps"),
-        default="cuda",
+        choices=("auto", "cuda", "cpu", "mps"),
+        default="auto",
+        help="auto prioriza CUDA, luego MPS; CPU requiere confirmación interactiva.",
     )
     parser.add_argument("--threads", type=int, default=DEFAULT_THREADS)
+    parser.add_argument(
+        "--math",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Activa/desactiva CodeFormulaV2. Default: activado.",
+    )
+    parser.add_argument(
+        "--tables",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Activa/desactiva TableFormer ACCURATE. Default: activado.",
+    )
+    parser.add_argument(
+        "--assets",
+        action="store_true",
+        help="Guarda crops PNG de tablas y figuras informativas. Default: no.",
+    )
     parser.add_argument(
         "--ocr-backend",
         choices=("torch", "onnxruntime", "openvino", "paddle"),
         default=DEFAULT_OCR_BACKEND,
     )
     parser.add_argument("--ocr-lang", default=DEFAULT_OCR_LANG)
-    parser.add_argument(
-        "--layout-preset",
-        default=DEFAULT_LAYOUT_PRESET,
-        help="Preset de layout de Docling; default: layout_egret_large.",
-    )
-    parser.add_argument(
-        "--image-scale",
-        type=float,
-        default=DEFAULT_IMAGE_SCALE,
-        help="Escala de render usada internamente para crops; default 3.0 (~216 DPI).",
-    )
-    parser.add_argument(
-        "--min-figure-area",
-        type=float,
-        default=DEFAULT_MIN_FIGURE_AREA,
-        help="Área mínima normalizada para figuras no-captioned.",
-    )
-    parser.add_argument(
-        "--keep-all-figures",
-        action="store_true",
-        help="Desactiva el filtrado de PictureItem y guarda todos los crops.",
-    )
-    parser.add_argument(
-        "--no-reference-split",
-        action="store_true",
-        help="No separa References/Bibliography del Markdown principal.",
-    )
-    parser.add_argument(
-        "--no-index",
-        action="store_true",
-        help="No actualiza Bib/INDEX.md.",
-    )
-    parser.add_argument(
-        "--no-agents",
-        action="store_true",
-        help="No crea Bib/AGENTS.md si falta.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Reprocesa aunque el Markdown sea más reciente que el PDF.",
-    )
+    parser.add_argument("--layout-preset", default=DEFAULT_LAYOUT_PRESET)
+    parser.add_argument("--image-scale", type=float, default=DEFAULT_IMAGE_SCALE)
+    parser.add_argument("--min-figure-area", type=float, default=DEFAULT_MIN_FIGURE_AREA)
+    parser.add_argument("--keep-all-figures", action="store_true")
+    parser.add_argument("--no-reference-split", action="store_true")
+    parser.add_argument("--no-index", action="store_true")
+    parser.add_argument("--no-agents", action="store_true")
+    parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
 
+def _available_accelerators() -> tuple[bool, bool, str]:
+    try:
+        import torch
+    except Exception as exc:
+        return False, False, f"PyTorch no se pudo importar: {exc}"
+
+    cuda = bool(torch.cuda.is_available())
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps = bool(mps_backend and mps_backend.is_available())
+    details = "PyTorch detectó CPU únicamente."
+
+    if cuda:
+        try:
+            details = f"CUDA: {torch.cuda.get_device_name(0)}"
+        except Exception:
+            details = "CUDA disponible"
+    elif mps:
+        details = "Apple MPS disponible"
+
+    return cuda, mps, details
+
+
+def _confirm_cpu(reason: str) -> None:
+    print(f"[WARNING] No se usará GPU: {reason}", file=sys.stderr)
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "El fallback a CPU requiere confirmación interactiva. "
+            "Ejecuta el comando en una terminal."
+        )
+
+    answer = input(
+        "¿Continuar con CPU? Esto puede ser mucho más lento. [y/N]: "
+    ).strip().casefold()
+
+    if answer not in {"y", "yes"}:
+        raise RuntimeError("Ejecución cancelada antes de usar CPU.")
+
+
 def resolve_device(name: str) -> AcceleratorDevice:
-    return {
-        "cuda": AcceleratorDevice.CUDA,
-        "auto": AcceleratorDevice.AUTO,
-        "cpu": AcceleratorDevice.CPU,
-        "mps": AcceleratorDevice.MPS,
-    }[name]
+    """Resolve a device with a strict GPU-first policy."""
+    cuda, mps, details = _available_accelerators()
+
+    if name == "auto":
+        if cuda:
+            print(f"[DEVICE] {details}")
+            return AcceleratorDevice.CUDA
+        if mps:
+            print(f"[DEVICE] {details}")
+            return AcceleratorDevice.MPS
+        _confirm_cpu(details)
+        return AcceleratorDevice.CPU
+
+    if name == "cuda":
+        if cuda:
+            print(f"[DEVICE] {details}")
+            return AcceleratorDevice.CUDA
+        _confirm_cpu("se solicitó CUDA, pero torch.cuda.is_available() == False")
+        return AcceleratorDevice.CPU
+
+    if name == "mps":
+        if mps:
+            print(f"[DEVICE] {details}")
+            return AcceleratorDevice.MPS
+        _confirm_cpu("se solicitó MPS, pero no está disponible")
+        return AcceleratorDevice.CPU
+
+    _confirm_cpu("se solicitó --device cpu explícitamente")
+    return AcceleratorDevice.CPU
 
 
 def discover_pdfs(pdf_dir: Path, query: str | None) -> list[Path]:
@@ -402,9 +396,11 @@ def build_fidelity_converter(
     ocr_lang: str,
     layout_preset: str,
     image_scale: float,
+    math_enrichment: bool,
+    table_enrichment: bool,
+    assets_enabled: bool,
 ) -> DocumentConverter:
-    """Highest-fidelity standard Docling pipeline used by both candidates."""
-
+    """Build the high-fidelity Docling PDF pipeline."""
     accelerator = AcceleratorOptions(num_threads=threads, device=device)
 
     ocr_kwargs: dict[str, Any] = {
@@ -415,38 +411,31 @@ def build_fidelity_converter(
         ocr_kwargs["mode"] = OcrMode.FULL_PAGE
     ocr_options = RapidOcrOptions(**ocr_kwargs)
 
-    # Explicitly use the current specialized formula model.
-    code_formula_options = CodeFormulaVlmOptions.from_preset("codeformulav2")
-
     pipeline = PdfPipelineOptions(
         do_ocr=True,
         ocr_options=ocr_options,
-        do_table_structure=True,
+        do_table_structure=table_enrichment,
         table_structure_options=TableStructureOptions(
             mode=TableFormerMode.ACCURATE,
             do_cell_matching=True,
         ),
-        do_formula_enrichment=True,
-        do_code_enrichment=True,
-        code_formula_options=code_formula_options,
     )
-
     pipeline.accelerator_options = accelerator
-
-    # Higher-accuracy layout model; time is intentionally traded for fidelity.
     pipeline.layout_options = LayoutObjectDetectionOptions.from_preset(layout_preset)
-
-    # Better heading hierarchy. Font/style signals require parsed pages.
     pipeline.heading_hierarchy_options = HeadingHierarchyOptions(enabled=True)
     pipeline.generate_parsed_pages = True
 
-    # Needed internally for table/figure crops. Full page images are NOT persisted.
-    pipeline.generate_page_images = True
-    pipeline.generate_picture_images = True
-    pipeline.images_scale = image_scale
+    pipeline.do_formula_enrichment = math_enrichment
+    pipeline.do_code_enrichment = math_enrichment
+    if math_enrichment:
+        pipeline.code_formula_options = CodeFormulaVlmOptions.from_preset("codeformulav2")
 
-    # Enables DocumentFigureClassifier; used to reject logos/signatures/etc.
-    pipeline.do_picture_classification = True
+    # Page renders stay in memory because they improve layout/table analysis.
+    # They are never persisted unless --assets is requested.
+    pipeline.generate_page_images = True
+    pipeline.generate_picture_images = assets_enabled
+    pipeline.images_scale = image_scale
+    pipeline.do_picture_classification = assets_enabled
 
     return DocumentConverter(
         allowed_formats=[InputFormat.PDF],
@@ -454,7 +443,6 @@ def build_fidelity_converter(
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline),
         },
     )
-
 
 # =============================================================================
 # Markdown serialization and cleaning
@@ -477,7 +465,7 @@ def remove_known_boilerplate_lines(text: str) -> str:
 
 
 def remove_generic_picture_placeholders(text: str) -> str:
-    # Visual evidence lives under Bib/assets. Generic placeholders only waste retrieval tokens.
+    # Visual evidence lives under bib/assets. Generic placeholders only waste retrieval tokens.
     text = re.sub(r"(?im)^\s*<!--\s*image\s*-->\s*$", "", text)
     text = re.sub(r"(?im)^\s*<!--\s*picture\s*-->\s*$", "", text)
     return text
@@ -742,6 +730,9 @@ def convert_candidate(
     ocr_lang: str,
     layout_preset: str,
     image_scale: float,
+    math_enrichment: bool,
+    table_enrichment: bool,
+    assets_enabled: bool,
 ) -> Candidate:
     full_page_ocr = mode == "full-page-ocr"
     converter = build_fidelity_converter(
@@ -752,14 +743,13 @@ def convert_candidate(
         ocr_lang=ocr_lang,
         layout_preset=layout_preset,
         image_scale=image_scale,
+        math_enrichment=math_enrichment,
+        table_enrichment=table_enrichment,
+        assets_enabled=assets_enabled,
     )
 
     start = time.perf_counter()
-    try:
-        result = converter.convert(pdf_path)
-    finally:
-        # Converter/model objects can be large. The result/document remains valid after release.
-        pass
+    result = converter.convert(pdf_path)
     seconds = time.perf_counter() - start
 
     markdown = serialize_candidate_markdown(
@@ -771,7 +761,6 @@ def convert_candidate(
     mean_grade, low_grade = extract_confidence_grades(result)
     combined = candidate_combined_score(diagnostics, mean_grade, low_grade)
 
-    # Explicitly release models before a possible second candidate is created.
     del converter
     cleanup_memory()
 
@@ -785,7 +774,6 @@ def convert_candidate(
         combined_score=combined,
         seconds=seconds,
     )
-
 
 def choose_candidate(candidates: list[Candidate]) -> Candidate:
     if len(candidates) == 1:
@@ -1159,6 +1147,7 @@ def build_front_matter(
     assets_dir: Path,
     refs_path: Path | None,
     asset_stats: AssetStats,
+    assets_enabled: bool,
 ) -> str:
     lines = [
         "---",
@@ -1166,21 +1155,29 @@ def build_front_matter(
         f"source_pdf: {yaml_quote('../pdf/' + pdf_path.name)}",
         f"source_filename: {yaml_quote(pdf_path.name)}",
         'format: "academic-paper"',
-        'extraction_profile: "token-efficient-high-fidelity"',
+        'extraction_profile: "text-math-tables-high-fidelity"',
         f"extraction_mode: {yaml_quote(winner.mode)}",
         f"extraction_quality: {yaml_quote(winner.diagnostics.grade)}",
         f"extraction_score: {winner.combined_score:.1f}",
-        'formula_enrichment: "codeformulav2"',
-        'table_structure: "accurate"',
-        f"tables_png: {asset_stats.tables}",
-        f"figures_png: {asset_stats.figures_kept}",
-        f"assets_dir: {yaml_quote('../assets/' + pdf_path.stem)}",
     ]
+
+    if assets_enabled:
+        lines.extend(
+            [
+                'visual_assets: "enabled"',
+                f"tables_png: {asset_stats.tables}",
+                f"figures_png: {asset_stats.figures_kept}",
+                f"assets_dir: {yaml_quote('../assets/' + pdf_path.stem)}",
+            ]
+        )
+    else:
+        lines.append('visual_assets: "disabled"')
+
     if refs_path is not None:
         lines.append(f"references_file: {yaml_quote('../references/' + refs_path.name)}")
+
     lines.extend(["---", ""])
     return "\n".join(lines) + "\n"
-
 
 def write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1198,6 +1195,7 @@ def finalize_markdown(
     assets_dir: Path,
     asset_stats: AssetStats,
     split_references: bool,
+    assets_enabled: bool,
 ) -> Path | None:
     body = number_page_breaks(winner.markdown)
 
@@ -1227,6 +1225,7 @@ def finalize_markdown(
         assets_dir=assets_dir,
         refs_path=refs_path,
         asset_stats=asset_stats,
+        assets_enabled=assets_enabled,
     )
     write_atomic(md_path, front + body)
     return refs_path
@@ -1306,33 +1305,47 @@ def build_index_block(
     refs_path: Path | None,
     winner: Candidate,
     stats: AssetStats,
+    assets_enabled: bool,
     preserved_lines: Iterable[str] = (),
 ) -> str:
     title = derive_title(md_path, pdf_path.stem)
     headings = extract_index_headings(md_path)
+
     lines = [
         f"### {title}",
         "",
         f"- Markdown: `extracted/{md_path.name}`",
         f"- PDF: `pdf/{pdf_path.name}`",
-        f"- Assets: `assets/{pdf_path.stem}/`",
         f"- Extraction: `{winner.mode}`",
         f"- Quality: `{winner.diagnostics.grade}` ({winner.combined_score:.1f})",
-        f"- Visual fallback: {stats.tables} table(s), {stats.figures_kept} informative figure(s)",
     ]
+
+    if assets_enabled:
+        lines.extend(
+            [
+                f"- Assets: `assets/{pdf_path.stem}/`",
+                (
+                    f"- Visual fallback: {stats.tables} table(s), "
+                    f"{stats.figures_kept} informative figure(s)"
+                ),
+            ]
+        )
+
     if refs_path is not None:
         lines.append(f"- References: `references/{refs_path.name}`")
+
     for preserved in preserved_lines:
         if preserved not in lines:
             lines.append(preserved)
+
     if headings:
         lines.append("- Sections:")
         for heading in headings:
             if heading.casefold() == title.casefold():
                 continue
             lines.append(f"  - {heading}")
-    return "\n".join(lines).rstrip() + "\n"
 
+    return "\n".join(lines).rstrip() + "\n"
 
 def update_index_block(
     *,
@@ -1342,14 +1355,15 @@ def update_index_block(
     refs_path: Path | None,
     winner: Candidate,
     stats: AssetStats,
+    assets_enabled: bool,
 ) -> None:
     if index_path.exists():
         original = index_path.read_text(encoding="utf-8")
     else:
         original = (
-            "# CMAT literature corpus\n\n"
-            "Índice compacto para recuperación. Use Markdown primero, assets sólo si "
-            "el texto/tablas son dudosos y PDF como fuente final de verificación.\n\n"
+            "# Literature corpus\n\n"
+            "Índice compacto para recuperación. Use Markdown primero; si existen assets, "
+            "úsalos sólo como fallback visual. El PDF es la fuente final de verificación.\n\n"
             "## Papers\n\n"
         )
 
@@ -1369,6 +1383,7 @@ def update_index_block(
         refs_path=refs_path,
         winner=winner,
         stats=stats,
+        assets_enabled=assets_enabled,
         preserved_lines=preserved,
     )
 
@@ -1389,24 +1404,20 @@ def update_index_block(
 # =============================================================================
 
 
-AGENTS_CONTENT = """# Literature retrieval policy for Bib/
+AGENTS_CONTENT = """# Literature retrieval policy for bib/
 
-The files in this directory are optimized to minimize context usage while preserving a
-high-fidelity fallback path.
+This directory is optimized for high-fidelity, low-context academic retrieval.
 
-1. Start with `Bib/INDEX.md` and identify only the papers relevant to the current question.
-2. Search/read `Bib/extracted/*.md` as the primary literature corpus; do not load the full
-   corpus into context at once.
-3. `Bib/references/` is intentionally separated from the main corpus. Search it only for
-   citation chaining, bibliography verification, or related-work discovery.
-4. If an exact table value, graph, or visually encoded result is unclear in Markdown, inspect
-   the specific PNG under `Bib/assets/<paper>/tables/` or `figures/` before opening the PDF.
-5. Treat `Bib/pdf/*.pdf` as the source of truth and open it only when Markdown + targeted
-   assets are insufficient or when a critical exact value needs final verification.
-6. Do not infer a numerical coefficient, p-value, confidence interval, sample size, or effect
-   size from a corrupted extraction. Verify it against a visual asset or the PDF.
-7. Generic extraction imperfections such as ligature spacing can be interpreted normally,
-   but material corruption should trigger the visual/PDF fallback path.
+1. Start with `bib/INDEX.md`; identify only the relevant papers.
+2. Read/search `bib/extracted/*.md` first. Markdown is the primary retrieval layer.
+3. Formulae and tables in Markdown should be treated as structured extracted content, but
+   critical exact values should still be verified against the original PDF when needed.
+4. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
+5. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
+   when a visually encoded table/figure cannot be resolved reliably from Markdown.
+6. `bib/pdf/*.pdf` is the source of truth.
+7. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
+   visibly corrupted extraction; verify it against the PDF.
 """
 
 
@@ -1448,25 +1459,28 @@ def process_one_pdf(
     assets_root: Path,
     index_path: Path,
     args: argparse.Namespace,
+    device: AcceleratorDevice,
 ) -> bool:
-    device = resolve_device(args.device)
     candidates: list[Candidate] = []
-
     print(f"\n[PDF] {pdf_path.name}")
+
+    common = dict(
+        pdf_path=pdf_path,
+        device=device,
+        threads=args.threads,
+        ocr_backend=args.ocr_backend,
+        ocr_lang=args.ocr_lang,
+        layout_preset=args.layout_preset,
+        image_scale=args.image_scale,
+        math_enrichment=args.math,
+        table_enrichment=args.tables,
+        assets_enabled=args.assets,
+    )
 
     try:
         if args.strategy in {"compare", "smart", "hybrid"}:
             print("  [1] hybrid/native + OCR")
-            hybrid = convert_candidate(
-                pdf_path=pdf_path,
-                mode="hybrid",
-                device=device,
-                threads=args.threads,
-                ocr_backend=args.ocr_backend,
-                ocr_lang=args.ocr_lang,
-                layout_preset=args.layout_preset,
-                image_scale=args.image_scale,
-            )
+            hybrid = convert_candidate(mode="hybrid", **common)
             candidates.append(hybrid)
             print_candidate(hybrid)
 
@@ -1476,16 +1490,7 @@ def process_one_pdf(
 
         if run_ocr:
             print("  [2] forced full-page OCR")
-            ocr_candidate = convert_candidate(
-                pdf_path=pdf_path,
-                mode="full-page-ocr",
-                device=device,
-                threads=args.threads,
-                ocr_backend=args.ocr_backend,
-                ocr_lang=args.ocr_lang,
-                layout_preset=args.layout_preset,
-                image_scale=args.image_scale,
-            )
+            ocr_candidate = convert_candidate(mode="full-page-ocr", **common)
             candidates.append(ocr_candidate)
             print_candidate(ocr_candidate)
 
@@ -1493,17 +1498,22 @@ def process_one_pdf(
             raise RuntimeError("No se produjo ningún candidato de extracción.")
 
         winner = choose_candidate(candidates)
-        print(f"  [WINNER] {winner.mode} — {winner.combined_score:.1f} ({winner.diagnostics.grade})")
-
-        # Export visual fallbacks only from the winning representation.
-        assets_dir = assets_root / pdf_path.stem
-        print("  [ASSETS] exporting all tables + filtered figures")
-        stats = export_assets(
-            document=winner.result.document,
-            assets_dir=assets_dir,
-            min_figure_area=args.min_figure_area,
-            keep_all_figures=args.keep_all_figures,
+        print(
+            f"  [WINNER] {winner.mode} — "
+            f"{winner.combined_score:.1f} ({winner.diagnostics.grade})"
         )
+
+        assets_dir = assets_root / pdf_path.stem
+        if args.assets:
+            print("  [ASSETS] exporting table crops + filtered figures")
+            stats = export_assets(
+                document=winner.result.document,
+                assets_dir=assets_dir,
+                min_figure_area=args.min_figure_area,
+                keep_all_figures=args.keep_all_figures,
+            )
+        else:
+            stats = AssetStats()
 
         refs_path = finalize_markdown(
             pdf_path=pdf_path,
@@ -1513,6 +1523,7 @@ def process_one_pdf(
             assets_dir=assets_dir,
             asset_stats=stats,
             split_references=not args.no_reference_split,
+            assets_enabled=args.assets,
         )
 
         if not args.no_index:
@@ -1523,14 +1534,15 @@ def process_one_pdf(
                 refs_path=refs_path,
                 winner=winner,
                 stats=stats,
+                assets_enabled=args.assets,
             )
 
         print(
-            f"  [OK] md={md_path.name} | refs={'yes' if refs_path else 'no'} | "
-            f"tables={stats.tables} | figures={stats.figures_kept}/{stats.pictures_seen} kept"
+            f"  [OK] md={md_path.name} | "
+            f"refs={'yes' if refs_path else 'no'} | "
+            f"assets={'yes' if args.assets else 'no'}"
         )
 
-        # Release candidate documents/page images after all outputs are written.
         candidates.clear()
         cleanup_memory()
         return True
@@ -1540,7 +1552,6 @@ def process_one_pdf(
         candidates.clear()
         cleanup_memory()
         return False
-
 
 # =============================================================================
 # Main
@@ -1562,7 +1573,7 @@ def main() -> int:
 
     try:
         repo = args.repo.expanduser().resolve() if args.repo else discover_repo_root()
-        bib = repo / "Bib"
+        bib = resolve_bib_dir(repo)
         pdf_dir = bib / "pdf"
         extracted_dir = bib / "extracted"
         refs_dir = bib / "references"
@@ -1572,17 +1583,20 @@ def main() -> int:
 
         extracted_dir.mkdir(parents=True, exist_ok=True)
         refs_dir.mkdir(parents=True, exist_ok=True)
-        assets_root.mkdir(parents=True, exist_ok=True)
+        if args.assets:
+            assets_root.mkdir(parents=True, exist_ok=True)
 
         pdfs = discover_pdfs(pdf_dir, args.paper)
         if not pdfs:
             print(f"[ERROR] No se encontraron PDFs en {pdf_dir}", file=sys.stderr)
             return 1
 
+        # Resolve once so CPU confirmation can never repeat once per paper.
+        device = resolve_device(args.device)
+
         if not args.no_agents:
             ensure_agents_file(agents_path)
 
-        # One backup per invocation, outside normal retrieval paths.
         if not args.no_index and index_path.exists():
             backup_dir = bib / ".backups"
             backup_dir.mkdir(parents=True, exist_ok=True)
@@ -1592,27 +1606,22 @@ def main() -> int:
             print(f"[BACKUP] {backup}")
 
         print("=" * 80)
-        print(" CMAT — TOKEN-EFFICIENT HIGH-FIDELITY EXTRACTION")
+        print(" DOCLING-MATH — HIGH-FIDELITY ACADEMIC EXTRACTION")
         print("=" * 80)
         print(f"Repo            : {repo}")
         print(f"PDFs            : {len(pdfs)}")
         print(f"Strategy        : {args.strategy}")
-        print(f"Device          : {args.device}")
+        print(f"Device          : {device}")
         print(f"OCR             : RapidOCR/{args.ocr_backend} lang={args.ocr_lang}")
         print(f"Layout          : {args.layout_preset}")
-        print("Tables          : TableFormer ACCURATE")
-        print("Formulas        : CodeFormulaV2 (always)")
-        print(f"Image scale     : {args.image_scale}")
-        print("Persist pages   : no")
-        print("Persist JSON    : no")
-        print("Persist HTML    : no")
-        print("Persist tables  : all PNG")
-        print("Persist figures : filtered PNG")
+        print(f"Math            : {'CodeFormulaV2' if args.math else 'off'}")
+        print(f"Tables          : {'TableFormer ACCURATE' if args.tables else 'off'}")
+        print(f"Persist assets  : {'yes' if args.assets else 'no'}")
+        print("Page markers    : yes")
+        print("Reference split : " + ("no" if args.no_reference_split else "yes"))
         print("=" * 80)
 
-        converted = 0
-        skipped = 0
-        failed = 0
+        converted = skipped = failed = 0
         start_total = time.perf_counter()
 
         for idx, pdf_path in enumerate(pdfs, 1):
@@ -1631,6 +1640,7 @@ def main() -> int:
                 assets_root=assets_root,
                 index_path=index_path,
                 args=args,
+                device=device,
             )
             if success:
                 converted += 1
@@ -1639,14 +1649,11 @@ def main() -> int:
 
         elapsed = time.perf_counter() - start_total
         print("\n" + "=" * 80)
-        print(" SUMMARY")
-        print("=" * 80)
         print(f"Converted : {converted}")
         print(f"Skipped   : {skipped}")
         print(f"Failed    : {failed}")
         print(f"Elapsed   : {elapsed / 60:.1f} min")
         print("=" * 80)
-
         return 2 if failed else 0
 
     except KeyboardInterrupt:
@@ -1655,7 +1662,6 @@ def main() -> int:
     except Exception as exc:
         print(f"[ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
