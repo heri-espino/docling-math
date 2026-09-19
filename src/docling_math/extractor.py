@@ -193,7 +193,10 @@ def resolve_bib_dir(repo: Path) -> Path:
         candidate = repo / name
         if candidate.is_dir():
             return candidate
-    return repo / "bib"\n\n\ndef parse_args() -> argparse.Namespace:
+    return repo / "bib"
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="docling-math",
         description=(
@@ -255,7 +258,10 @@ def resolve_bib_dir(repo: Path) -> Path:
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-agents", action="store_true")
     parser.add_argument("--force", action="store_true")
-    return parser.parse_args()\n\n\ndef _available_accelerators() -> tuple[bool, bool, str]:
+    return parser.parse_args()
+
+
+def _available_accelerators() -> tuple[bool, bool, str]:
     try:
         import torch
     except Exception as exc:
@@ -322,7 +328,10 @@ def resolve_device(name: str) -> AcceleratorDevice:
         return AcceleratorDevice.CPU
 
     _confirm_cpu("se solicitó --device cpu explícitamente")
-    return AcceleratorDevice.CPU\n\n\ndef discover_pdfs(pdf_dir: Path, query: str | None) -> list[Path]:
+    return AcceleratorDevice.CPU
+
+
+def discover_pdfs(pdf_dir: Path, query: str | None) -> list[Path]:
     files = sorted(pdf_dir.glob("*.pdf"), key=lambda p: p.name.casefold())
     if query is None:
         return files
@@ -482,7 +491,10 @@ def normalize_markdown(text: str) -> str:
     text = remove_generic_picture_placeholders(text)
     text = remove_consecutive_duplicate_lines(text)
     text = "\n".join(line.rstrip() for line in text.splitlines())
-    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    text = re.sub(r"\n{4,}", "
+
+
+", text)
     return text.strip() + "\n"
 
 
