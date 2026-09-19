@@ -193,9 +193,7 @@ def resolve_bib_dir(repo: Path) -> Path:
         candidate = repo / name
         if candidate.is_dir():
             return candidate
-    return repo / "bib"
-
-def parse_args() -> argparse.Namespace:
+    return repo / "bib"\n\n\ndef parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="docling-math",
         description=(
@@ -257,9 +255,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-agents", action="store_true")
     parser.add_argument("--force", action="store_true")
-    return parser.parse_args()
-
-def _available_accelerators() -> tuple[bool, bool, str]:
+    return parser.parse_args()\n\n\ndef _available_accelerators() -> tuple[bool, bool, str]:
     try:
         import torch
     except Exception as exc:
@@ -326,9 +322,7 @@ def resolve_device(name: str) -> AcceleratorDevice:
         return AcceleratorDevice.CPU
 
     _confirm_cpu("se solicitó --device cpu explícitamente")
-    return AcceleratorDevice.CPU
-
-def discover_pdfs(pdf_dir: Path, query: str | None) -> list[Path]:
+    return AcceleratorDevice.CPU\n\n\ndef discover_pdfs(pdf_dir: Path, query: str | None) -> list[Path]:
     files = sorted(pdf_dir.glob("*.pdf"), key=lambda p: p.name.casefold())
     if query is None:
         return files
@@ -427,8 +421,9 @@ def build_fidelity_converter(
     if math_enrichment:
         pipeline.code_formula_options = CodeFormulaVlmOptions.from_preset("codeformulav2")
 
-    # Visual assets are not materialized by default.
-    pipeline.generate_page_images = assets_enabled
+    # Page renders stay in memory because they improve layout/table analysis.
+    # They are never persisted unless --assets is requested.
+    pipeline.generate_page_images = True
     pipeline.generate_picture_images = assets_enabled
     pipeline.images_scale = image_scale
     pipeline.do_picture_classification = assets_enabled
@@ -1143,6 +1138,7 @@ def build_front_matter(
     assets_dir: Path,
     refs_path: Path | None,
     asset_stats: AssetStats,
+    assets_enabled: bool,
 ) -> str:
     lines = [
         "---",
@@ -1150,19 +1146,29 @@ def build_front_matter(
         f"source_pdf: {yaml_quote('../pdf/' + pdf_path.name)}",
         f"source_filename: {yaml_quote(pdf_path.name)}",
         'format: "academic-paper"',
-        'extraction_profile: "token-efficient-high-fidelity"',
+        'extraction_profile: "text-math-tables-high-fidelity"',
         f"extraction_mode: {yaml_quote(winner.mode)}",
         f"extraction_quality: {yaml_quote(winner.diagnostics.grade)}",
         f"extraction_score: {winner.combined_score:.1f}",
-        f"tables_png: {asset_stats.tables}",
-        f"figures_png: {asset_stats.figures_kept}",
-        f"assets_dir: {yaml_quote('../assets/' + pdf_path.stem)}",
     ]
+
+    if assets_enabled:
+        lines.extend(
+            [
+                'visual_assets: "enabled"',
+                f"tables_png: {asset_stats.tables}",
+                f"figures_png: {asset_stats.figures_kept}",
+                f"assets_dir: {yaml_quote('../assets/' + pdf_path.stem)}",
+            ]
+        )
+    else:
+        lines.append('visual_assets: "disabled"')
+
     if refs_path is not None:
         lines.append(f"references_file: {yaml_quote('../references/' + refs_path.name)}")
+
     lines.extend(["---", ""])
     return "\n".join(lines) + "\n"
-
 
 def write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1180,6 +1186,7 @@ def finalize_markdown(
     assets_dir: Path,
     asset_stats: AssetStats,
     split_references: bool,
+    assets_enabled: bool,
 ) -> Path | None:
     body = number_page_breaks(winner.markdown)
 
@@ -1209,6 +1216,7 @@ def finalize_markdown(
         assets_dir=assets_dir,
         refs_path=refs_path,
         asset_stats=asset_stats,
+        assets_enabled=assets_enabled,
     )
     write_atomic(md_path, front + body)
     return refs_path
@@ -1288,33 +1296,47 @@ def build_index_block(
     refs_path: Path | None,
     winner: Candidate,
     stats: AssetStats,
+    assets_enabled: bool,
     preserved_lines: Iterable[str] = (),
 ) -> str:
     title = derive_title(md_path, pdf_path.stem)
     headings = extract_index_headings(md_path)
+
     lines = [
         f"### {title}",
         "",
         f"- Markdown: `extracted/{md_path.name}`",
         f"- PDF: `pdf/{pdf_path.name}`",
-        f"- Assets: `assets/{pdf_path.stem}/`",
         f"- Extraction: `{winner.mode}`",
         f"- Quality: `{winner.diagnostics.grade}` ({winner.combined_score:.1f})",
-        f"- Visual fallback: {stats.tables} table(s), {stats.figures_kept} informative figure(s)",
     ]
+
+    if assets_enabled:
+        lines.extend(
+            [
+                f"- Assets: `assets/{pdf_path.stem}/`",
+                (
+                    f"- Visual fallback: {stats.tables} table(s), "
+                    f"{stats.figures_kept} informative figure(s)"
+                ),
+            ]
+        )
+
     if refs_path is not None:
         lines.append(f"- References: `references/{refs_path.name}`")
+
     for preserved in preserved_lines:
         if preserved not in lines:
             lines.append(preserved)
+
     if headings:
         lines.append("- Sections:")
         for heading in headings:
             if heading.casefold() == title.casefold():
                 continue
             lines.append(f"  - {heading}")
-    return "\n".join(lines).rstrip() + "\n"
 
+    return "\n".join(lines).rstrip() + "\n"
 
 def update_index_block(
     *,
@@ -1324,14 +1346,15 @@ def update_index_block(
     refs_path: Path | None,
     winner: Candidate,
     stats: AssetStats,
+    assets_enabled: bool,
 ) -> None:
     if index_path.exists():
         original = index_path.read_text(encoding="utf-8")
     else:
         original = (
             "# Literature corpus\n\n"
-            "Índice compacto para recuperación. Use Markdown primero, assets sólo si "
-            "el texto/tablas son dudosos y PDF como fuente final de verificación.\n\n"
+            "Índice compacto para recuperación. Use Markdown primero; si existen assets, "
+            "úsalos sólo como fallback visual. El PDF es la fuente final de verificación.\n\n"
             "## Papers\n\n"
         )
 
@@ -1351,6 +1374,7 @@ def update_index_block(
         refs_path=refs_path,
         winner=winner,
         stats=stats,
+        assets_enabled=assets_enabled,
         preserved_lines=preserved,
     )
 
@@ -1490,6 +1514,7 @@ def process_one_pdf(
             assets_dir=assets_dir,
             asset_stats=stats,
             split_references=not args.no_reference_split,
+            assets_enabled=args.assets,
         )
 
         if not args.no_index:
@@ -1500,6 +1525,7 @@ def process_one_pdf(
                 refs_path=refs_path,
                 winner=winner,
                 stats=stats,
+                assets_enabled=args.assets,
             )
 
         print(
