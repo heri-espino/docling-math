@@ -491,10 +491,7 @@ def normalize_markdown(text: str) -> str:
     text = remove_generic_picture_placeholders(text)
     text = remove_consecutive_duplicate_lines(text)
     text = "\n".join(line.rstrip() for line in text.splitlines())
-    text = re.sub(r"\n{4,}", "
-
-
-", text)
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
     return text.strip() + "\n"
 
 
