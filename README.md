@@ -199,3 +199,21 @@ ruff check src
 ## License
 
 MIT.
+
+## Fast copy and pasto
+
+```powershell
+git clone https://github.com/heri-espino/docling.git
+cd docling
+
+conda env create -f environment.yml
+conda activate docling-math
+
+python -m pip install --upgrade pip
+
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+
+python -m pip install -e .
+```
