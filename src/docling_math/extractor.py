@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import gc
 import hashlib
+import os
 import re
 import shutil
 import sys
@@ -60,6 +61,7 @@ DEFAULT_LAYOUT_PRESET = "layout_egret_large"
 DEFAULT_OCR_BACKEND = "torch"
 DEFAULT_OCR_LANG = "en"
 DEFAULT_STRATEGY = "compare"
+DEFAULT_MODEL_CACHE = Path.home() / ".cache" / "docling" / "models"
 MAX_INDEX_HEADINGS = 10
 
 # Figure filtering is intentionally conservative: false positives are cheaper than
@@ -257,8 +259,108 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-reference-split", action="store_true")
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-agents", action="store_true")
+    parser.add_argument(
+        "--no-bundle",
+        action="store_true",
+        help="No genera bib/bundle.md al terminar. Default: sí lo genera.",
+    )
+    parser.add_argument(
+        "--bundle-references",
+        action="store_true",
+        help="Incluye bibliografías separadas dentro de bundle.md. Default: no.",
+    )
+    parser.add_argument(
+        "--artifacts-path",
+        type=Path,
+        default=None,
+        help="Cache persistente de pesos. Default: ~/.cache/docling/models.",
+    )
+    parser.add_argument(
+        "--refresh-models",
+        action="store_true",
+        help="Fuerza revalidación/descarga de los pesos del cache.",
+    )
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
+
+
+def resolve_artifacts_path(explicit: Path | None) -> Path:
+    """Return the persistent Docling model cache used across projects and runs."""
+    if explicit is not None:
+        path = explicit.expanduser().resolve()
+    elif os.environ.get("DOCLING_ARTIFACTS_PATH"):
+        path = Path(os.environ["DOCLING_ARTIFACTS_PATH"]).expanduser().resolve()
+    else:
+        path = DEFAULT_MODEL_CACHE
+
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _installed_docling_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("docling")
+    except Exception:
+        return "unknown"
+
+
+def ensure_model_cache(
+    *,
+    artifacts_path: Path,
+    layout_preset: str,
+    refresh: bool = False,
+) -> None:
+    """Prefetch Docling weights once and reuse the same local artifacts afterwards."""
+    docling_version = _installed_docling_version()
+    safe_version = re.sub(r"[^A-Za-z0-9_.-]+", "-", docling_version)
+    core_marker = artifacts_path / f".docling-math-core-{safe_version}.ready"
+
+    if refresh or not core_marker.exists():
+        print(f"[MODELS] preparing persistent cache: {artifacts_path}")
+        from docling.utils.model_downloader import download_models
+
+        download_models(
+            output_dir=artifacts_path,
+            force=refresh,
+            progress=True,
+            with_layout=False,
+        )
+        core_marker.write_text(
+            f"docling={docling_version}\n",
+            encoding="utf-8",
+        )
+    else:
+        print(f"[MODELS] reusing persistent cache: {artifacts_path}")
+
+    layout_options = LayoutObjectDetectionOptions.from_preset(layout_preset)
+    model_spec = getattr(layout_options, "model_spec", None)
+    repo_id = getattr(model_spec, "repo_id", None)
+    revision = getattr(model_spec, "revision", None)
+    if not repo_id:
+        return
+
+    marker_name = re.sub(
+        r"[^A-Za-z0-9_.-]+",
+        "-",
+        f".docling-math-layout-{repo_id}-{revision or 'default'}.ready",
+    )
+    layout_marker = artifacts_path / marker_name
+    if refresh or not layout_marker.exists():
+        print(f"[MODELS] caching layout preset {layout_preset}: {repo_id}")
+        from docling.models.utils.hf_model_download import download_hf_model
+
+        download_hf_model(
+            repo_id=repo_id,
+            revision=revision,
+            local_dir=artifacts_path / repo_id.replace("/", "--"),
+            force=refresh,
+            progress=True,
+        )
+        layout_marker.write_text(
+            f"preset={layout_preset}\nrepo_id={repo_id}\nrevision={revision or ''}\n",
+            encoding="utf-8",
+        )
 
 
 def _available_accelerators() -> tuple[bool, bool, str]:
@@ -399,6 +501,7 @@ def build_fidelity_converter(
     math_enrichment: bool,
     table_enrichment: bool,
     assets_enabled: bool,
+    artifacts_path: Path,
 ) -> DocumentConverter:
     """Build the high-fidelity Docling PDF pipeline."""
     accelerator = AcceleratorOptions(num_threads=threads, device=device)
@@ -421,6 +524,7 @@ def build_fidelity_converter(
         ),
     )
     pipeline.accelerator_options = accelerator
+    pipeline.artifacts_path = artifacts_path
     pipeline.layout_options = LayoutObjectDetectionOptions.from_preset(layout_preset)
     pipeline.heading_hierarchy_options = HeadingHierarchyOptions(enabled=True)
     pipeline.generate_parsed_pages = True
