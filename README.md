@@ -239,7 +239,7 @@ ruff check src
 
 MIT.
 
-## Fast copy and pasto
+## Fast copy and paste
 
 ```powershell
 git clone https://github.com/heri-espino/docling-math.git
