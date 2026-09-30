@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import gc
 import hashlib
+import os
 import re
 import shutil
 import sys
@@ -60,6 +61,7 @@ DEFAULT_LAYOUT_PRESET = "layout_egret_large"
 DEFAULT_OCR_BACKEND = "torch"
 DEFAULT_OCR_LANG = "en"
 DEFAULT_STRATEGY = "compare"
+DEFAULT_MODEL_CACHE = Path.home() / ".cache" / "docling" / "models"
 MAX_INDEX_HEADINGS = 10
 
 # Figure filtering is intentionally conservative: false positives are cheaper than
@@ -257,8 +259,108 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-reference-split", action="store_true")
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-agents", action="store_true")
+    parser.add_argument(
+        "--no-bundle",
+        action="store_true",
+        help="No genera bib/bundle.md al terminar. Default: sí lo genera.",
+    )
+    parser.add_argument(
+        "--bundle-references",
+        action="store_true",
+        help="Incluye bibliografías separadas dentro de bundle.md. Default: no.",
+    )
+    parser.add_argument(
+        "--artifacts-path",
+        type=Path,
+        default=None,
+        help="Cache persistente de pesos. Default: ~/.cache/docling/models.",
+    )
+    parser.add_argument(
+        "--refresh-models",
+        action="store_true",
+        help="Fuerza revalidación/descarga de los pesos del cache.",
+    )
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
+
+
+def resolve_artifacts_path(explicit: Path | None) -> Path:
+    """Return the persistent Docling model cache used across projects and runs."""
+    if explicit is not None:
+        path = explicit.expanduser().resolve()
+    elif os.environ.get("DOCLING_ARTIFACTS_PATH"):
+        path = Path(os.environ["DOCLING_ARTIFACTS_PATH"]).expanduser().resolve()
+    else:
+        path = DEFAULT_MODEL_CACHE
+
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _installed_docling_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("docling")
+    except Exception:
+        return "unknown"
+
+
+def ensure_model_cache(
+    *,
+    artifacts_path: Path,
+    layout_preset: str,
+    refresh: bool = False,
+) -> None:
+    """Prefetch Docling weights once and reuse the same local artifacts afterwards."""
+    docling_version = _installed_docling_version()
+    safe_version = re.sub(r"[^A-Za-z0-9_.-]+", "-", docling_version)
+    core_marker = artifacts_path / f".docling-math-core-{safe_version}.ready"
+
+    if refresh or not core_marker.exists():
+        print(f"[MODELS] preparing persistent cache: {artifacts_path}")
+        from docling.utils.model_downloader import download_models
+
+        download_models(
+            output_dir=artifacts_path,
+            force=refresh,
+            progress=True,
+            with_layout=False,
+        )
+        core_marker.write_text(
+            f"docling={docling_version}\n",
+            encoding="utf-8",
+        )
+    else:
+        print(f"[MODELS] reusing persistent cache: {artifacts_path}")
+
+    layout_options = LayoutObjectDetectionOptions.from_preset(layout_preset)
+    model_spec = getattr(layout_options, "model_spec", None)
+    repo_id = getattr(model_spec, "repo_id", None)
+    revision = getattr(model_spec, "revision", None)
+    if not repo_id:
+        return
+
+    marker_name = re.sub(
+        r"[^A-Za-z0-9_.-]+",
+        "-",
+        f".docling-math-layout-{repo_id}-{revision or 'default'}.ready",
+    )
+    layout_marker = artifacts_path / marker_name
+    if refresh or not layout_marker.exists():
+        print(f"[MODELS] caching layout preset {layout_preset}: {repo_id}")
+        from docling.models.utils.hf_model_download import download_hf_model
+
+        download_hf_model(
+            repo_id=repo_id,
+            revision=revision,
+            local_dir=artifacts_path / repo_id.replace("/", "--"),
+            force=refresh,
+            progress=True,
+        )
+        layout_marker.write_text(
+            f"preset={layout_preset}\nrepo_id={repo_id}\nrevision={revision or ''}\n",
+            encoding="utf-8",
+        )
 
 
 def _available_accelerators() -> tuple[bool, bool, str]:
@@ -399,6 +501,7 @@ def build_fidelity_converter(
     math_enrichment: bool,
     table_enrichment: bool,
     assets_enabled: bool,
+    artifacts_path: Path,
 ) -> DocumentConverter:
     """Build the high-fidelity Docling PDF pipeline."""
     accelerator = AcceleratorOptions(num_threads=threads, device=device)
@@ -421,6 +524,7 @@ def build_fidelity_converter(
         ),
     )
     pipeline.accelerator_options = accelerator
+    pipeline.artifacts_path = artifacts_path
     pipeline.layout_options = LayoutObjectDetectionOptions.from_preset(layout_preset)
     pipeline.heading_hierarchy_options = HeadingHierarchyOptions(enabled=True)
     pipeline.generate_parsed_pages = True
@@ -733,6 +837,7 @@ def convert_candidate(
     math_enrichment: bool,
     table_enrichment: bool,
     assets_enabled: bool,
+    artifacts_path: Path,
 ) -> Candidate:
     full_page_ocr = mode == "full-page-ocr"
     converter = build_fidelity_converter(
@@ -746,6 +851,7 @@ def convert_candidate(
         math_enrichment=math_enrichment,
         table_enrichment=table_enrichment,
         assets_enabled=assets_enabled,
+        artifacts_path=artifacts_path,
     )
 
     start = time.perf_counter()
@@ -1400,6 +1506,130 @@ def update_index_block(
 
 
 # =============================================================================
+# AI-readable bundle.md
+# =============================================================================
+
+
+def build_bundle(
+    *,
+    extracted_dir: Path,
+    pdf_dir: Path,
+    refs_dir: Path,
+    bundle_path: Path,
+    include_references: bool,
+) -> int:
+    """Concatenate the current corpus into one deterministic AI-readable Markdown file."""
+    pdf_by_stem = {path.stem: path for path in pdf_dir.glob("*.pdf")}
+    md_files = sorted(
+        (
+            path
+            for path in extracted_dir.glob("*.md")
+            if path.stem in pdf_by_stem
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+
+    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    lines = [
+        "---",
+        'format: "docling-math-corpus-bundle"',
+        f"generated_at: {yaml_quote(generated_at)}",
+        f"paper_count: {len(md_files)}",
+        f"references_included: {'true' if include_references else 'false'}",
+        'source_directory: "extracted/"',
+        "---",
+        "",
+        "# Literature bundle",
+        "",
+        (
+            "Machine-oriented corpus generated by docling-math. Each paper is delimited "
+            "by explicit BEGIN/END markers so an AI can recover document boundaries reliably."
+        ),
+        "",
+        (
+            "Separated bibliographies are "
+            + (
+                "included after each paper."
+                if include_references
+                else "omitted by default to reduce retrieval noise."
+            )
+        ),
+        "",
+        "## Corpus map",
+        "",
+    ]
+
+    blocks: list[str] = []
+    for index, md_path in enumerate(md_files, 1):
+        paper_id = f"P{index:03d}"
+        title = derive_title(md_path, md_path.stem)
+        pdf_path = pdf_by_stem[md_path.stem]
+        refs_path = refs_dir / f"{md_path.stem}.references.md"
+        headings = extract_index_headings(md_path, limit=6)
+
+        lines.append(
+            f"{index}. **{paper_id} — {title}**  "
+            f"(Markdown: extracted/{md_path.name}; PDF: pdf/{pdf_path.name})"
+        )
+        useful = [h for h in headings if h.casefold() != title.casefold()][:5]
+        if useful:
+            lines.append("   - Sections: " + " · ".join(useful))
+
+        raw = md_path.read_text(encoding="utf-8", errors="replace")
+        body = strip_front_matter(raw).strip()
+
+        block = [
+            "",
+            f"<!-- ===== BEGIN PAPER {paper_id} ===== -->",
+            "",
+            f"# {paper_id} — {title}",
+            "",
+            f"- Source Markdown: extracted/{md_path.name}",
+            f"- Source PDF: pdf/{pdf_path.name}",
+        ]
+        if refs_path.exists():
+            block.append(f"- References: references/{refs_path.name}")
+        block.extend(
+            [
+                "",
+                "<!-- BEGIN EXTRACTED CONTENT -->",
+                "",
+                body,
+                "",
+                "<!-- END EXTRACTED CONTENT -->",
+            ]
+        )
+
+        if include_references and refs_path.exists():
+            refs_raw = refs_path.read_text(encoding="utf-8", errors="replace")
+            refs_body = strip_front_matter(refs_raw).strip()
+            block.extend(
+                [
+                    "",
+                    f"## {paper_id} — References",
+                    "",
+                    refs_body,
+                ]
+            )
+
+        block.extend(
+            [
+                "",
+                f"<!-- ===== END PAPER {paper_id} ===== -->",
+                "",
+            ]
+        )
+        blocks.append("\n".join(block))
+
+    content = "\n".join(lines).rstrip() + "\n"
+    if blocks:
+        content += "\n## Papers\n" + "".join(blocks)
+    write_atomic(bundle_path, content.rstrip() + "\n")
+    print(f"[BUNDLE] {bundle_path} ({len(md_files)} papers)")
+    return len(md_files)
+
+
+# =============================================================================
 # AGENTS.md retrieval policy
 # =============================================================================
 
@@ -1409,14 +1639,15 @@ AGENTS_CONTENT = """# Literature retrieval policy for bib/
 This directory is optimized for high-fidelity, low-context academic retrieval.
 
 1. Start with `bib/INDEX.md`; identify only the relevant papers.
-2. Read/search `bib/extracted/*.md` first. Markdown is the primary retrieval layer.
-3. Formulae and tables in Markdown should be treated as structured extracted content, but
+2. Use `bib/bundle.md` for whole-corpus review or when one file is easier to pass to an AI.
+3. Read/search `bib/extracted/*.md` first for targeted retrieval. Markdown is the primary retrieval layer.
+4. Formulae and tables in Markdown should be treated as structured extracted content, but
    critical exact values should still be verified against the original PDF when needed.
-4. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
-5. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
+5. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
+6. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
    when a visually encoded table/figure cannot be resolved reliably from Markdown.
-6. `bib/pdf/*.pdf` is the source of truth.
-7. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
+7. `bib/pdf/*.pdf` is the source of truth.
+8. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
    visibly corrupted extraction; verify it against the PDF.
 """
 
@@ -1460,6 +1691,7 @@ def process_one_pdf(
     index_path: Path,
     args: argparse.Namespace,
     device: AcceleratorDevice,
+    artifacts_path: Path,
 ) -> bool:
     candidates: list[Candidate] = []
     print(f"\n[PDF] {pdf_path.name}")
@@ -1475,6 +1707,7 @@ def process_one_pdf(
         math_enrichment=args.math,
         table_enrichment=args.tables,
         assets_enabled=args.assets,
+        artifacts_path=artifacts_path,
     )
 
     try:
@@ -1580,6 +1813,8 @@ def main() -> int:
         assets_root = bib / "assets"
         index_path = bib / "INDEX.md"
         agents_path = bib / "AGENTS.md"
+        bundle_path = bib / "bundle.md"
+        artifacts_path = resolve_artifacts_path(args.artifacts_path)
 
         extracted_dir.mkdir(parents=True, exist_ok=True)
         refs_dir.mkdir(parents=True, exist_ok=True)
@@ -1590,6 +1825,12 @@ def main() -> int:
         if not pdfs:
             print(f"[ERROR] No se encontraron PDFs en {pdf_dir}", file=sys.stderr)
             return 1
+
+        ensure_model_cache(
+            artifacts_path=artifacts_path,
+            layout_preset=args.layout_preset,
+            refresh=args.refresh_models,
+        )
 
         # Resolve once so CPU confirmation can never repeat once per paper.
         device = resolve_device(args.device)
@@ -1617,6 +1858,8 @@ def main() -> int:
         print(f"Math            : {'CodeFormulaV2' if args.math else 'off'}")
         print(f"Tables          : {'TableFormer ACCURATE' if args.tables else 'off'}")
         print(f"Persist assets  : {'yes' if args.assets else 'no'}")
+        print(f"Model cache     : {artifacts_path}")
+        print(f"Bundle          : {'no' if args.no_bundle else 'bib/bundle.md'}")
         print("Page markers    : yes")
         print("Reference split : " + ("no" if args.no_reference_split else "yes"))
         print("=" * 80)
@@ -1641,11 +1884,21 @@ def main() -> int:
                 index_path=index_path,
                 args=args,
                 device=device,
+                artifacts_path=artifacts_path,
             )
             if success:
                 converted += 1
             else:
                 failed += 1
+
+        if not args.no_bundle:
+            build_bundle(
+                extracted_dir=extracted_dir,
+                pdf_dir=pdf_dir,
+                refs_dir=refs_dir,
+                bundle_path=bundle_path,
+                include_references=args.bundle_references,
+            )
 
         elapsed = time.perf_counter() - start_total
         print("\n" + "=" * 80)
