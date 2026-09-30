@@ -837,6 +837,7 @@ def convert_candidate(
     math_enrichment: bool,
     table_enrichment: bool,
     assets_enabled: bool,
+    artifacts_path: Path,
 ) -> Candidate:
     full_page_ocr = mode == "full-page-ocr"
     converter = build_fidelity_converter(
@@ -850,6 +851,7 @@ def convert_candidate(
         math_enrichment=math_enrichment,
         table_enrichment=table_enrichment,
         assets_enabled=assets_enabled,
+        artifacts_path=artifacts_path,
     )
 
     start = time.perf_counter()
@@ -1564,6 +1566,7 @@ def process_one_pdf(
     index_path: Path,
     args: argparse.Namespace,
     device: AcceleratorDevice,
+    artifacts_path: Path,
 ) -> bool:
     candidates: list[Candidate] = []
     print(f"\n[PDF] {pdf_path.name}")
@@ -1579,6 +1582,7 @@ def process_one_pdf(
         math_enrichment=args.math,
         table_enrichment=args.tables,
         assets_enabled=args.assets,
+        artifacts_path=artifacts_path,
     )
 
     try:
@@ -1684,6 +1688,8 @@ def main() -> int:
         assets_root = bib / "assets"
         index_path = bib / "INDEX.md"
         agents_path = bib / "AGENTS.md"
+        bundle_path = bib / "bundle.md"
+        artifacts_path = resolve_artifacts_path(args.artifacts_path)
 
         extracted_dir.mkdir(parents=True, exist_ok=True)
         refs_dir.mkdir(parents=True, exist_ok=True)
@@ -1694,6 +1700,12 @@ def main() -> int:
         if not pdfs:
             print(f"[ERROR] No se encontraron PDFs en {pdf_dir}", file=sys.stderr)
             return 1
+
+        ensure_model_cache(
+            artifacts_path=artifacts_path,
+            layout_preset=args.layout_preset,
+            refresh=args.refresh_models,
+        )
 
         # Resolve once so CPU confirmation can never repeat once per paper.
         device = resolve_device(args.device)
@@ -1721,6 +1733,8 @@ def main() -> int:
         print(f"Math            : {'CodeFormulaV2' if args.math else 'off'}")
         print(f"Tables          : {'TableFormer ACCURATE' if args.tables else 'off'}")
         print(f"Persist assets  : {'yes' if args.assets else 'no'}")
+        print(f"Model cache     : {artifacts_path}")
+        print(f"Bundle          : {'no' if args.no_bundle else 'bib/bundle.md'}")
         print("Page markers    : yes")
         print("Reference split : " + ("no" if args.no_reference_split else "yes"))
         print("=" * 80)
@@ -1745,6 +1759,7 @@ def main() -> int:
                 index_path=index_path,
                 args=args,
                 device=device,
+                artifacts_path=artifacts_path,
             )
             if success:
                 converted += 1
