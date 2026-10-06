@@ -1,7 +1,7 @@
 # docling-math
 
 High-fidelity academic PDF → Markdown extraction built on Docling, packaged as a small
-Python library with one CLI command.
+Python library with an extraction CLI and a synchronized literature-renaming utility.
 
 The default profile is optimized for mathematics-heavy papers:
 
@@ -215,7 +215,7 @@ For explicit renames of an existing literature corpus, use the separate
 ### Python API
 
 ```python
-from docling_math.rename_literature import rename_literature
+from docling_math import rename_literature
 
 rename_literature(
     {
