@@ -125,6 +125,7 @@ assets       off
 references   split
 page markers on
 bundle       on  (bib/bundle.md)
+rename PDFs  off
 model cache  ~/.cache/docling/models
 ```
 
@@ -167,6 +168,45 @@ Disable bundle generation:
 
     docling-math --no-bundle
 
+## Optional canonical PDF names
+
+PDF renaming is opt-in:
+
+```powershell
+docling-math --rename-pdfs
+```
+
+When authors, publication year, and title can be inferred confidently from the extracted
+paper, the PDF and its companion outputs are renamed to:
+
+```text
+Author1_Author2-Year-Title_of_article.pdf
+```
+
+Only the first two author surnames are used. Hyphenated surnames are joined, accents and
+filesystem-hostile punctuation are normalized, and title words are separated with
+underscores.
+
+For example:
+
+```text
+Daniela Cortes-Toto y Heriberto Espino
+2011
+Estimacion de tendencia
+```
+
+becomes:
+
+```text
+CortesToto_Espino-2011-Estimacion_de_tendencia.pdf
+```
+
+The corresponding `extracted/*.md`, `references/*.md`, optional assets directory,
+`INDEX.md`, and regenerated `bundle.md` stay synchronized. Existing extracted papers
+can be renamed without re-running OCR. If metadata is incomplete or the destination name
+already exists, docling-math leaves the original name unchanged rather than guessing or
+overwriting files.
+
 ## Common commands
 
 One paper:
@@ -205,6 +245,12 @@ Force reprocessing:
 docling-math --force
 ```
 
+Rename PDFs using inferred academic metadata:
+
+```powershell
+docling-math --rename-pdfs
+```
+
 Use another project explicitly:
 
 ```powershell
@@ -232,6 +278,7 @@ The console command and module entry point call the same pipeline.
 ```powershell
 python -m pip install -e ".[dev]"
 python -m compileall src
+pytest -q
 ruff check src
 ```
 
