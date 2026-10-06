@@ -17,6 +17,11 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q src
 
+      - name: Test filename inference
+        run: |
+          python -m pip install pytest
+          PYTHONPATH=src python -m pytest -q tests/test_naming.py
+
       - name: Build package
         run: |
           python -m pip install --upgrade pip build
