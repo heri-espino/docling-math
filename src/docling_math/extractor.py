@@ -560,7 +560,7 @@ def rename_corpus_entry(
     collisions = [
         dst
         for src, dst in moves
-        if src != dst and src.exists() and dst.exists()
+        if src != dst and dst.exists()
     ]
     if collisions:
         names = ", ".join(str(path) for path in collisions)
