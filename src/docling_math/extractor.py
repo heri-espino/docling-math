@@ -50,6 +50,8 @@ from docling.document_converter import (
 )
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
+from .naming import infer_paper_identity
+
 
 # =============================================================================
 # Defaults
@@ -260,6 +262,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-index", action="store_true")
     parser.add_argument("--no-agents", action="store_true")
     parser.add_argument(
+        "--rename-pdfs",
+        action="store_true",
+        help=(
+            "Renombra PDFs y outputs como Author1_Author2-Year-Title_of_article. "
+            "Sólo renombra cuando puede inferir autores, año y título."
+        ),
+    )
+    parser.add_argument(
         "--no-bundle",
         action="store_true",
         help="No genera bib/bundle.md al terminar. Default: sí lo genera.",
@@ -454,6 +464,145 @@ def needs_processing(pdf_path: Path, md_path: Path, force: bool) -> bool:
         return pdf_path.stat().st_mtime > md_path.stat().st_mtime
     except OSError:
         return True
+
+
+# =============================================================================
+# Canonical PDF / corpus renaming
+# =============================================================================
+
+
+def _rewrite_front_matter_names(
+    path: Path,
+    *,
+    old_pdf_name: str,
+    new_pdf_name: str,
+    old_stem: str,
+    new_stem: str,
+) -> None:
+    """Update only YAML front matter paths/IDs after moving an extracted file."""
+    if not path.exists():
+        return
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.startswith("---\n"):
+        return
+
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return
+
+    front = text[: end + len("\n---\n")]
+    body = text[end + len("\n---\n") :]
+    front = front.replace(old_pdf_name, new_pdf_name)
+    front = front.replace(old_stem, new_stem)
+    write_atomic(path, front + body)
+
+
+def _replace_index_paths(
+    index_path: Path,
+    *,
+    old_pdf_name: str,
+    new_pdf_name: str,
+    old_stem: str,
+    new_stem: str,
+) -> None:
+    if not index_path.exists():
+        return
+
+    text = index_path.read_text(encoding="utf-8", errors="replace")
+    replacements = {
+        f"pdf/{old_pdf_name}": f"pdf/{new_pdf_name}",
+        f"extracted/{old_stem}.md": f"extracted/{new_stem}.md",
+        f"references/{old_stem}.references.md": f"references/{new_stem}.references.md",
+        f"assets/{old_stem}/": f"assets/{new_stem}/",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    write_atomic(index_path, text)
+
+
+def rename_corpus_entry(
+    *,
+    pdf_path: Path,
+    md_path: Path,
+    refs_dir: Path,
+    assets_root: Path,
+    index_path: Path,
+    markdown_for_identity: str,
+) -> tuple[Path, Path, bool]:
+    """Rename one paper and any already-existing companion outputs atomically enough to retry."""
+    identity = infer_paper_identity(markdown_for_identity)
+    if identity is None:
+        print(
+            f"  [RENAME-SKIP] {pdf_path.name}: no pude inferir autores + año + título"
+        )
+        return pdf_path, md_path, False
+
+    old_stem = pdf_path.stem
+    new_stem = identity.stem
+    if old_stem == new_stem:
+        return pdf_path, md_path, False
+
+    new_pdf = pdf_path.with_name(f"{new_stem}.pdf")
+    new_md = md_path.with_name(f"{new_stem}.md")
+    old_refs = refs_dir / f"{old_stem}.references.md"
+    new_refs = refs_dir / f"{new_stem}.references.md"
+    old_assets = assets_root / old_stem
+    new_assets = assets_root / new_stem
+
+    moves = [
+        (pdf_path, new_pdf),
+        (md_path, new_md),
+        (old_refs, new_refs),
+        (old_assets, new_assets),
+    ]
+
+    collisions = [
+        dst
+        for src, dst in moves
+        if src != dst and src.exists() and dst.exists()
+    ]
+    if collisions:
+        names = ", ".join(str(path) for path in collisions)
+        print(
+            f"  [RENAME-SKIP] {pdf_path.name}: destino ya existe ({names})",
+            file=sys.stderr,
+        )
+        return pdf_path, md_path, False
+
+    # The source PDF must move. Companion files/directories move only when present.
+    pdf_path.rename(new_pdf)
+    for src, dst in moves[1:]:
+        if src.exists() and src != dst:
+            src.rename(dst)
+
+    _rewrite_front_matter_names(
+        new_md,
+        old_pdf_name=pdf_path.name,
+        new_pdf_name=new_pdf.name,
+        old_stem=old_stem,
+        new_stem=new_stem,
+    )
+    _rewrite_front_matter_names(
+        new_refs,
+        old_pdf_name=pdf_path.name,
+        new_pdf_name=new_pdf.name,
+        old_stem=old_stem,
+        new_stem=new_stem,
+    )
+    _replace_index_paths(
+        index_path,
+        old_pdf_name=pdf_path.name,
+        new_pdf_name=new_pdf.name,
+        old_stem=old_stem,
+        new_stem=new_stem,
+    )
+
+    print(
+        f"  [RENAME] {pdf_path.name} -> {new_pdf.name} "
+        f"(authors={','.join(identity.authors)}; year={identity.year})"
+    )
+    return new_pdf, new_md, True
 
 
 # =============================================================================
@@ -1692,8 +1841,9 @@ def process_one_pdf(
     args: argparse.Namespace,
     device: AcceleratorDevice,
     artifacts_path: Path,
-) -> bool:
+) -> tuple[bool, bool]:
     candidates: list[Candidate] = []
+    renamed = False
     print(f"\n[PDF] {pdf_path.name}")
 
     common = dict(
@@ -1735,6 +1885,16 @@ def process_one_pdf(
             f"  [WINNER] {winner.mode} — "
             f"{winner.combined_score:.1f} ({winner.diagnostics.grade})"
         )
+
+        if args.rename_pdfs:
+            pdf_path, md_path, renamed = rename_corpus_entry(
+                pdf_path=pdf_path,
+                md_path=md_path,
+                refs_dir=refs_dir,
+                assets_root=assets_root,
+                index_path=index_path,
+                markdown_for_identity=winner.markdown,
+            )
 
         assets_dir = assets_root / pdf_path.stem
         if args.assets:
@@ -1778,13 +1938,13 @@ def process_one_pdf(
 
         candidates.clear()
         cleanup_memory()
-        return True
+        return True, renamed
 
     except Exception as exc:
         print(f"  [FAIL] {type(exc).__name__}: {exc}", file=sys.stderr)
         candidates.clear()
         cleanup_memory()
-        return False
+        return False, renamed
 
 # =============================================================================
 # Main
@@ -1860,11 +2020,12 @@ def main() -> int:
         print(f"Persist assets  : {'yes' if args.assets else 'no'}")
         print(f"Model cache     : {artifacts_path}")
         print(f"Bundle          : {'no' if args.no_bundle else 'bib/bundle.md'}")
+        print(f"Rename PDFs     : {'yes' if args.rename_pdfs else 'no'}")
         print("Page markers    : yes")
         print("Reference split : " + ("no" if args.no_reference_split else "yes"))
         print("=" * 80)
 
-        converted = skipped = failed = 0
+        converted = skipped = failed = renamed = 0
         start_total = time.perf_counter()
 
         for idx, pdf_path in enumerate(pdfs, 1):
@@ -1872,11 +2033,26 @@ def main() -> int:
             print(f"\n[{idx:02d}/{len(pdfs):02d}]", end="")
 
             if not needs_processing(pdf_path, md_path, args.force):
-                print(f" [SKIP] {pdf_path.name}")
+                if args.rename_pdfs and md_path.exists():
+                    existing_markdown = md_path.read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    pdf_path, md_path, did_rename = rename_corpus_entry(
+                        pdf_path=pdf_path,
+                        md_path=md_path,
+                        refs_dir=refs_dir,
+                        assets_root=assets_root,
+                        index_path=index_path,
+                        markdown_for_identity=existing_markdown,
+                    )
+                    if did_rename:
+                        renamed += 1
+                print(f" [SKIP] extraction: {pdf_path.name}")
                 skipped += 1
                 continue
 
-            success = process_one_pdf(
+            success, did_rename = process_one_pdf(
                 pdf_path=pdf_path,
                 md_path=md_path,
                 refs_dir=refs_dir,
@@ -1886,6 +2062,8 @@ def main() -> int:
                 device=device,
                 artifacts_path=artifacts_path,
             )
+            if did_rename:
+                renamed += 1
             if success:
                 converted += 1
             else:
@@ -1905,6 +2083,7 @@ def main() -> int:
         print(f"Converted : {converted}")
         print(f"Skipped   : {skipped}")
         print(f"Failed    : {failed}")
+        print(f"Renamed   : {renamed}")
         print(f"Elapsed   : {elapsed / 60:.1f} min")
         print("=" * 80)
         return 2 if failed else 0
