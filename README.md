@@ -1,7 +1,7 @@
 # docling-math
 
 High-fidelity academic PDF → Markdown extraction built on Docling, packaged as a small
-Python library with one CLI command.
+Python library with an extraction CLI and a synchronized literature-renaming utility.
 
 The default profile is optimized for mathematics-heavy papers:
 
@@ -206,6 +206,79 @@ The corresponding `extracted/*.md`, `references/*.md`, optional assets directory
 can be renamed without re-running OCR. If metadata is incomplete or the destination name
 already exists, docling-math leaves the original name unchanged rather than guessing or
 overwriting files.
+
+## Manual corpus renaming
+
+For explicit renames of an existing literature corpus, use the separate
+`rename_literature` tool. It does not load Docling or any GPU models.
+
+### Python API
+
+```python
+from docling_math import rename_literature
+
+rename_literature(
+    {
+        "123456.pdf": "CortesToto_Espino-2011-Estimacion_de_tendencia.pdf",
+        "download.pdf": "Smith_Jones-2024-Another_paper.pdf",
+    },
+    repo=r"C:\path\to\project",
+)
+```
+
+The dictionary is `current_name -> desired_name`. The `.pdf` extension is optional.
+
+### CLI with direct pairs
+
+```powershell
+rename_literature --rename "123456.pdf=CortesToto_Espino-2011-Estimacion_de_tendencia.pdf"
+```
+
+Repeat `--rename` for several papers:
+
+```powershell
+rename_literature `
+  --rename "123456.pdf=CortesToto_Espino-2011-Estimacion_de_tendencia.pdf" `
+  --rename "download.pdf=Smith_Jones-2024-Another_paper.pdf"
+```
+
+### CLI with a JSON dictionary
+
+Create `renames.json`:
+
+```json
+{
+  "123456.pdf": "CortesToto_Espino-2011-Estimacion_de_tendencia.pdf",
+  "download.pdf": "Smith_Jones-2024-Another_paper.pdf"
+}
+```
+
+Then run:
+
+```powershell
+rename_literature --map renames.json
+```
+
+Preview everything first without modifying files:
+
+```powershell
+rename_literature --map renames.json --dry-run
+```
+
+For every mapping, the tool synchronizes:
+
+- `bib/pdf/old.pdf -> new.pdf`
+- `bib/extracted/old.md -> new.md`
+- `bib/references/old.references.md -> new.references.md`
+- `bib/assets/old/ -> new/` when present
+- all active Markdown references under `bib/`, including front-matter IDs,
+  `INDEX.md`, `bundle.md`, and cross-references from other Markdown files.
+
+Historical files inside `bib/.backups/` are intentionally not rewritten. Before changing
+anything, the tool validates the full mapping and every destination. File moves use a
+two-phase transaction, so swaps such as `A.pdf -> B.pdf` and `B.pdf -> A.pdf` are safe.
+If any destination would overwrite an unrelated file, the operation stops before making
+changes.
 
 ## Common commands
 

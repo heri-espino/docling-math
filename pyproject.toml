@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docling-math"
-version = "0.3.0"
+version = "0.4.0"
 description = "GPU-first, high-fidelity academic PDF extraction with careful math and tables."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -25,6 +25,8 @@ dev = [
 
 [project.scripts]
 docling-math = "docling_math.extractor:main"
+rename-literature = "docling_math.rename_literature:main"
+rename_literature = "docling_math.rename_literature:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docling_math"]

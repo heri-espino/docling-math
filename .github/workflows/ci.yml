@@ -17,10 +17,10 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q src
 
-      - name: Test filename inference
+      - name: Test naming and literature rename tools
         run: |
           python -m pip install pytest
-          PYTHONPATH=src python -m pytest -q tests/test_naming.py
+          PYTHONPATH=src python -m pytest -q tests/test_naming.py tests/test_rename_literature.py
 
       - name: Build package
         run: |
