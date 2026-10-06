@@ -233,7 +233,33 @@ def _active_markdown_files(bib: Path) -> list[Path]:
     return sorted(files, key=lambda path: str(path).casefold())
 
 
-def _rewrite_front_matter_ids(text: str, pair: RenamePair) -> str:
+def _simultaneous_replace(text: str, replacements: list[tuple[str, str]]) -> str:
+    """Apply literal replacements without cascades, including A->B / B->A swaps."""
+    unique: dict[str, str] = {}
+    for old, new in replacements:
+        if old == new:
+            continue
+        existing = unique.get(old)
+        if existing is not None and existing != new:
+            raise ValueError(f"Reemplazos internos conflictivos para {old!r}.")
+        unique[old] = new
+
+    placeholders: list[tuple[str, str]] = []
+    updated = text
+    for index, old in enumerate(sorted(unique, key=len, reverse=True)):
+        token = f"\x00RENAME_LITERATURE_{index}_{uuid.uuid4().hex}\x00"
+        updated = updated.replace(old, token)
+        placeholders.append((token, unique[old]))
+
+    for token, new in placeholders:
+        updated = updated.replace(token, new)
+    return updated
+
+
+def _rewrite_front_matter_ids(
+    text: str,
+    pairs: tuple[RenamePair, ...],
+) -> str:
     if not text.startswith("---\n"):
         return text
     end = text.find("\n---\n", 4)
@@ -243,28 +269,30 @@ def _rewrite_front_matter_ids(text: str, pair: RenamePair) -> str:
     front = text[: end + len("\n---\n")]
     body = text[end + len("\n---\n") :]
 
-    replacements = (
-        (pair.old_stem, pair.new_stem),
-        (f"{pair.old_stem}-references", f"{pair.new_stem}-references"),
-    )
-    for old, new in replacements:
-        pattern = re.compile(
-            rf'(?m)^(?P<prefix>\s*id:\s*["\']?){re.escape(old)}(?P<suffix>["\']?\s*)$'
-        )
-        front = pattern.sub(
-            lambda match: f"{match.group('prefix')}{new}{match.group('suffix')}",
-            front,
+    id_map: dict[str, str] = {}
+    for pair in pairs:
+        id_map[pair.old_stem.casefold()] = pair.new_stem
+        id_map[f"{pair.old_stem}-references".casefold()] = (
+            f"{pair.new_stem}-references"
         )
 
+    pattern = re.compile(
+        r'(?m)^(?P<prefix>\s*id:\s*["\']?)(?P<value>[^"\'\n]+)(?P<suffix>["\']?\s*)$'
+    )
+
+    def replace_id(match: re.Match[str]) -> str:
+        value = match.group("value")
+        new_value = id_map.get(value.casefold())
+        if new_value is None:
+            return match.group(0)
+        return f"{match.group('prefix')}{new_value}{match.group('suffix')}"
+
+    front = pattern.sub(replace_id, front)
     return front + body
 
 
 def rewrite_markdown_text(text: str, pairs: tuple[RenamePair, ...]) -> str:
     """Rewrite file/path references without blindly replacing arbitrary paper text."""
-    updated = text
-
-    # Replace the most specific path/filename forms first. Sorting by old length prevents
-    # short filenames from partially consuming longer references.
     replacements: list[tuple[str, str]] = []
     for pair in pairs:
         replacements.extend(
@@ -277,13 +305,8 @@ def rewrite_markdown_text(text: str, pairs: tuple[RenamePair, ...]) -> str:
             ]
         )
 
-    for old, new in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
-        updated = updated.replace(old, new)
-
-    for pair in pairs:
-        updated = _rewrite_front_matter_ids(updated, pair)
-
-    return updated
+    updated = _simultaneous_replace(text, replacements)
+    return _rewrite_front_matter_ids(updated, pairs)
 
 
 def _stage_moves(moves: tuple[Move, ...]) -> list[tuple[Move, Path]]:
