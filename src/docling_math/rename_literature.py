@@ -330,20 +330,10 @@ def _stage_moves(moves: tuple[Move, ...]) -> list[tuple[Move, Path]]:
 
 
 def _finish_moves(staged: list[tuple[Move, Path]]) -> None:
-    finished: list[tuple[Move, Path]] = []
-    try:
-        for move, temp in staged:
-            temp.rename(move.destination)
-            finished.append((move, temp))
-    except Exception:
-        # Move finalized destinations back to their temp slots, then all temps to sources.
-        for move, temp in reversed(finished):
-            if move.destination.exists():
-                move.destination.rename(temp)
-        for move, temp in reversed(staged):
-            if temp.exists():
-                temp.rename(move.source)
-        raise
+    # Rollback is intentionally centralized in the caller. Keeping a single rollback
+    # layer avoids double-undo bugs when rename sets contain cycles or swaps.
+    for move, temp in staged:
+        temp.rename(move.destination)
 
 
 def _rollback_completed_moves(staged: list[tuple[Move, Path]]) -> None:
