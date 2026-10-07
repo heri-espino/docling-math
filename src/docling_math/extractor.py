@@ -50,7 +50,10 @@ from docling.document_converter import (
 )
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
+from .markdown_metadata import enrich_markdown_file, enrich_markdown_text, update_related_papers
+from .metadata import PaperMetadata, infer_paper_metadata
 from .naming import infer_paper_identity
+from .pdf_metadata import write_pdf_metadata
 
 
 # =============================================================================
@@ -268,6 +271,39 @@ def parse_args() -> argparse.Namespace:
             "Renombra PDFs y outputs como Author1_Author2-Year-Title_of_article. "
             "Sólo renombra cuando puede inferir autores, año y título."
         ),
+    )
+    parser.add_argument(
+        "--metadata",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Añade metadata bibliográfica, keywords, tags y aliases al YAML. Default: sí.",
+    )
+    parser.add_argument(
+        "--refresh-metadata",
+        action="store_true",
+        help="Actualiza metadata de Markdown ya extraídos sin volver a ejecutar OCR.",
+    )
+    parser.add_argument(
+        "--write-pdf-metadata",
+        action="store_true",
+        help="Escribe Title/Author/Keywords y XMP dentro del PDF. Modifica el PDF fuente.",
+    )
+    parser.add_argument(
+        "--obsidian",
+        action="store_true",
+        help="Añade propiedades Obsidian, wikilink al PDF y relaciones entre papers.",
+    )
+    parser.add_argument(
+        "--related-papers",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Con --obsidian, genera hasta 5 enlaces related por tags compartidos.",
+    )
+    parser.add_argument(
+        "--obsidian-vault",
+        type=Path,
+        default=None,
+        help="Sincroniza una copia Obsidian-ready al vault indicado.",
     )
     parser.add_argument(
         "--no-bundle",
