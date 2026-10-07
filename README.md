@@ -173,6 +173,96 @@ Disable bundle generation:
 
     docling-math --no-bundle
 
+## Upgrade an existing corpus without OCR
+
+Users coming from docling-math 0.1 or another older version do not need to extract their
+papers again. The upgrade tool reads the Markdown already present in the corpus and migrates
+it to the current metadata/index/bundle format.
+
+The simplest command from inside an existing project is:
+
+```powershell
+upgrade-corpus
+```
+
+The same workflow is available through the main CLI:
+
+```powershell
+docling-math --upgrade-corpus
+```
+
+A normal upgrade:
+
+- reads the existing `bib/extracted/*.md`;
+- adds or refreshes title, authors, year, journal, DOI, keywords, tags, aliases, and topics;
+- preserves the extracted Markdown body;
+- rebuilds `INDEX.md`;
+- rebuilds `bundle.md`;
+- backs up the previous `INDEX.md` and `bundle.md` under `bib/.backups/upgrade-<timestamp>/`;
+- does not run Docling, OCR, CodeFormulaV2, TableFormer, CUDA, or model downloads.
+
+PDF metadata remains opt-in because it rewrites PDF containers:
+
+```powershell
+upgrade-corpus --write-pdf-metadata
+```
+
+Obsidian properties and related-paper links can be added during the same migration:
+
+```powershell
+upgrade-corpus --obsidian
+```
+
+Or migrate and create/update the Obsidian mirror in one command:
+
+```powershell
+upgrade-corpus --obsidian-vault "C:\Users\Heri\Documents\My Vault"
+```
+
+### Choose exactly which folder to transform
+
+You do not need to move into the project directory. Pass the folder directly:
+
+```powershell
+upgrade-corpus --corpus-dir "D:\Research\Trend-Estimation"
+```
+
+The selected path may be any of these:
+
+```text
+D:\Research\Trend-Estimation
+D:\Research\Trend-Estimation\bib
+D:\Research\Trend-Estimation\bib\extracted
+```
+
+docling-math resolves all three to the same corpus.
+
+For users who do not want to type a path, open the operating system's native folder picker:
+
+```powershell
+upgrade-corpus --select-folder
+```
+
+or:
+
+```powershell
+docling-math --upgrade-corpus --select-folder
+```
+
+Select the project root, `bib`, or `bib/extracted`; the tool detects the corpus
+automatically.
+
+A full migration of an old corpus can therefore be:
+
+```powershell
+upgrade-corpus `
+  --select-folder `
+  --write-pdf-metadata `
+  --obsidian-vault "C:\Users\Heri\Documents\My Vault"
+```
+
+This still does not re-run extraction or OCR.
+
 ## Bibliographic metadata and tags
 
 Every newly extracted Markdown note receives structured YAML metadata by default. The same
@@ -456,10 +546,16 @@ Rename PDFs using inferred academic metadata:
 docling-math --rename-pdfs
 ```
 
-Refresh metadata without OCR:
+Refresh only metadata without OCR:
 
 ```powershell
 docling-math --refresh-metadata
+```
+
+Upgrade an entire legacy corpus without OCR:
+
+```powershell
+upgrade-corpus --select-folder
 ```
 
 Write metadata inside PDFs:
