@@ -53,6 +53,7 @@ from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 from .markdown_metadata import enrich_markdown_file, enrich_markdown_text, update_related_papers
 from .metadata import PaperMetadata, infer_paper_metadata
 from .naming import infer_paper_identity
+from .obsidian_vault import sync_obsidian_vault
 from .pdf_metadata import write_pdf_metadata
 
 
@@ -1934,6 +1935,12 @@ def process_one_pdf(
             f"{winner.combined_score:.1f} ({winner.diagnostics.grade})"
         )
 
+        paper_metadata = infer_paper_metadata(winner.markdown)
+        if paper_metadata.title:
+            print(f"  [METADATA] title={paper_metadata.title}")
+        if paper_metadata.keywords:
+            print(f"  [METADATA] keywords={len(paper_metadata.keywords)} tags={len(paper_metadata.tags)}")
+
         if args.rename_pdfs:
             pdf_path, md_path, renamed = rename_corpus_entry(
                 pdf_path=pdf_path,
@@ -1943,6 +1950,10 @@ def process_one_pdf(
                 index_path=index_path,
                 markdown_for_identity=winner.markdown,
             )
+
+        if args.write_pdf_metadata:
+            if write_pdf_metadata(pdf_path, paper_metadata):
+                print("  [PDF-METADATA] Info + XMP updated")
 
         assets_dir = assets_root / pdf_path.stem
         if args.assets:
@@ -1965,6 +1976,9 @@ def process_one_pdf(
             asset_stats=stats,
             split_references=not args.no_reference_split,
             assets_enabled=args.assets,
+            paper_metadata=paper_metadata,
+            metadata_enabled=args.metadata,
+            obsidian=args.obsidian,
         )
 
         if not args.no_index:
@@ -2001,6 +2015,8 @@ def process_one_pdf(
 
 def main() -> int:
     args = parse_args()
+    if args.obsidian_vault is not None:
+        args.obsidian = True
 
     if args.threads < 1:
         print("[ERROR] --threads debe ser >= 1", file=sys.stderr)
