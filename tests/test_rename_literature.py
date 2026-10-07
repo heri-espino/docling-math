@@ -162,3 +162,27 @@ def test_mapping_accepts_stems_without_pdf_extension(tmp_path):
     repo = _make_project(tmp_path)
     rename_literature({"123": "Readable_Name"}, repo=repo)
     assert (repo / "bib" / "pdf" / "Readable_Name.pdf").exists()
+
+
+def test_rename_updates_obsidian_related_wikilinks(tmp_path):
+    repo = _make_project(tmp_path)
+    related = repo / "bib" / "related.md"
+    related.write_text(
+        """---
+related:
+  - "[[123]]"
+  - "[[123|Readable label]]"
+---
+
+Links: [[123]] and [[123|Readable label]].
+""",
+        encoding="utf-8",
+    )
+
+    rename_literature({"123.pdf": "Readable_Name.pdf"}, repo=repo)
+
+    text = related.read_text(encoding="utf-8")
+    assert "[[123]]" not in text
+    assert "[[123|" not in text
+    assert "[[Readable_Name]]" in text
+    assert "[[Readable_Name|Readable label]]" in text
