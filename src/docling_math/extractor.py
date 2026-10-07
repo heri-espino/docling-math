@@ -1780,16 +1780,26 @@ def build_bundle(
         pdf_path = pdf_by_stem[md_path.stem]
         refs_path = refs_dir / f"{md_path.stem}.references.md"
         headings = extract_index_headings(md_path, limit=6)
+        raw = md_path.read_text(encoding="utf-8", errors="replace")
+        metadata = infer_paper_metadata(raw)
 
         lines.append(
             f"{index}. **{paper_id} — {title}**  "
             f"(Markdown: extracted/{md_path.name}; PDF: pdf/{pdf_path.name})"
         )
+        if metadata.authors:
+            lines.append("   - Authors: " + "; ".join(metadata.authors))
+        if metadata.year is not None:
+            lines.append(f"   - Year: {metadata.year}")
+        if metadata.keywords:
+            lines.append("   - Keywords: " + "; ".join(metadata.keywords))
+        if metadata.tags:
+            lines.append("   - Tags: " + ", ".join(metadata.tags))
+
         useful = [h for h in headings if h.casefold() != title.casefold()][:5]
         if useful:
             lines.append("   - Sections: " + " · ".join(useful))
 
-        raw = md_path.read_text(encoding="utf-8", errors="replace")
         body = strip_front_matter(raw).strip()
 
         block = [
@@ -1801,6 +1811,18 @@ def build_bundle(
             f"- Source Markdown: extracted/{md_path.name}",
             f"- Source PDF: pdf/{pdf_path.name}",
         ]
+        if metadata.authors:
+            block.append("- Authors: " + "; ".join(metadata.authors))
+        if metadata.year is not None:
+            block.append(f"- Year: {metadata.year}")
+        if metadata.journal:
+            block.append(f"- Journal: {metadata.journal}")
+        if metadata.doi:
+            block.append(f"- DOI: {metadata.doi}")
+        if metadata.keywords:
+            block.append("- Keywords: " + "; ".join(metadata.keywords))
+        if metadata.tags:
+            block.append("- Tags: " + ", ".join(metadata.tags))
         if refs_path.exists():
             block.append(f"- References: references/{refs_path.name}")
         block.extend(
