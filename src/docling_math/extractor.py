@@ -50,6 +50,13 @@ from docling.document_converter import (
 )
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
+from .corpus_upgrade import (
+    discover_corpus_from_cwd,
+    print_report as print_upgrade_report,
+    resolve_corpus_dir,
+    select_corpus_folder,
+    upgrade_corpus,
+)
 from .markdown_metadata import enrich_markdown_file, enrich_markdown_text, update_related_papers
 from .metadata import PaperMetadata, infer_paper_metadata
 from .naming import infer_paper_identity
@@ -213,6 +220,28 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--repo", type=Path, default=None, help="Raíz del proyecto.")
+    parser.add_argument(
+        "--upgrade-corpus",
+        action="store_true",
+        help=(
+            "Migra un corpus existente a metadata/tags/INDEX/bundle actuales "
+            "sin volver a ejecutar OCR."
+        ),
+    )
+    parser.add_argument(
+        "--corpus-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Carpeta a migrar: raíz del proyecto, bib/, o bib/extracted/. "
+            "Se usa con --upgrade-corpus."
+        ),
+    )
+    parser.add_argument(
+        "--select-folder",
+        action="store_true",
+        help="Con --upgrade-corpus, abre un selector gráfico de carpeta.",
+    )
     parser.add_argument(
         "--paper",
         type=str,
@@ -2057,6 +2086,37 @@ def main() -> int:
     args = parse_args()
     if args.obsidian_vault is not None:
         args.obsidian = True
+
+    if args.upgrade_corpus:
+        try:
+            if args.select_folder and args.corpus_dir is not None:
+                raise ValueError("Usa --select-folder o --corpus-dir, no ambos.")
+
+            if args.select_folder:
+                corpus_dir = select_corpus_folder()
+            elif args.corpus_dir is not None:
+                corpus_dir = resolve_corpus_dir(args.corpus_dir)
+            elif args.repo is not None:
+                corpus_dir = resolve_corpus_dir(args.repo)
+            else:
+                corpus_dir = discover_corpus_from_cwd()
+
+            report = upgrade_corpus(
+                corpus_dir,
+                obsidian=args.obsidian,
+                related_papers=args.related_papers,
+                write_pdf_metadata_enabled=args.write_pdf_metadata,
+                obsidian_vault=args.obsidian_vault,
+                include_references_in_bundle=args.bundle_references,
+            )
+            print_upgrade_report(report)
+            return 0
+        except KeyboardInterrupt:
+            print("\n[INTERRUPTED]", file=sys.stderr)
+            return 130
+        except Exception as exc:
+            print(f"[ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
 
     if args.threads < 1:
         print("[ERROR] --threads debe ser >= 1", file=sys.stderr)
