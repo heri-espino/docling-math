@@ -28,6 +28,7 @@ def _ordered_front_matter(
     pdf_name: str,
     metadata: PaperMetadata,
     obsidian: bool,
+    pdf_link: str | None = None,
 ) -> dict[str, Any]:
     front: dict[str, Any] = {}
 
@@ -55,7 +56,7 @@ def _ordered_front_matter(
         front["topics"] = topics
 
     if obsidian:
-        front["pdf"] = f"[[{pdf_name}]]"
+        front["pdf"] = f"[[{pdf_link or pdf_name}]]"
         css = existing.get("cssclasses")
         classes = list(css) if isinstance(css, list) else []
         if "literature-note" not in classes:
@@ -79,6 +80,7 @@ def enrich_markdown_text(
     pdf_name: str,
     metadata: PaperMetadata | None = None,
     obsidian: bool = False,
+    pdf_link: str | None = None,
 ) -> str:
     """Merge bibliographic metadata into YAML without changing the extracted body."""
     existing, body = split_front_matter(markdown)
@@ -89,6 +91,7 @@ def enrich_markdown_text(
         pdf_name=pdf_name,
         metadata=resolved,
         obsidian=obsidian,
+        pdf_link=pdf_link,
     )
     dumped = yaml.safe_dump(
         front,
