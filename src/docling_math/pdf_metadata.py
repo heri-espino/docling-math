@@ -11,15 +11,16 @@ from .metadata import PaperMetadata
 
 
 def _keyword_values(metadata: PaperMetadata) -> list[str]:
-    values = list(metadata.keywords)
-    if not values:
-        values = [
-            tag
-            for tag in metadata.tags
-            if tag != "literature"
-            and not tag.startswith("author/")
-            and not tag.startswith("year/")
-        ]
+    """Combine original article keywords with normalized library tags."""
+    values: list[str] = []
+    seen: set[str] = set()
+    for value in (*metadata.keywords, *metadata.tags):
+        clean = str(value).strip()
+        key = clean.casefold()
+        if not clean or key in seen:
+            continue
+        seen.add(key)
+        values.append(clean)
     return values
 
 
@@ -55,7 +56,8 @@ def write_pdf_metadata(
     keywords = _keyword_values(metadata)
     if keywords:
         info["/Keywords"] = ", ".join(keywords)
-        info["/Subject"] = "; ".join(keywords)
+        subject_values = list(metadata.keywords) or keywords
+        info["/Subject"] = "; ".join(subject_values)
 
     if metadata.doi:
         info["/DOI"] = metadata.doi
