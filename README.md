@@ -10,6 +10,8 @@ The default profile is optimized for mathematics-heavy papers:
 - **TableFormer ACCURATE** table reconstruction;
 - page provenance markers such as `<!-- p:12 -->`;
 - optional split of late References/Bibliography sections;
+- bibliographic YAML properties, original keywords, normalized tags, and aliases;
+- optional PDF Info/XMP metadata and Obsidian integration;
 - **no persisted figures or table PNGs by default**.
 
 Use `--assets` only when you want visual fallbacks.
@@ -237,6 +239,10 @@ docling-math --write-pdf-metadata
 This writes regular PDF Info metadata and XMP metadata while preserving the document pages.
 Fields include title, authors, publication year, journal, DOI, original keywords, normalized
 tags, and the abstract when available.
+
+This operation rewrites the PDF container. Do not use it when you need to preserve an
+existing digital signature byte-for-byte; rewriting a signed PDF can invalidate its
+signature.
 
 Because an intentional PDF metadata rewrite changes the PDF modification time, docling-math
 refreshes the companion Markdown afterwards so it does not trigger unnecessary extraction on
