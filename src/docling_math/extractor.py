@@ -1877,13 +1877,15 @@ This directory is optimized for high-fidelity, low-context academic retrieval.
 1. Start with `bib/INDEX.md`; identify only the relevant papers.
 2. Use `bib/bundle.md` for whole-corpus review or when one file is easier to pass to an AI.
 3. Read/search `bib/extracted/*.md` first for targeted retrieval. Markdown is the primary retrieval layer.
-4. Formulae and tables in Markdown should be treated as structured extracted content, but
+4. YAML properties contain bibliographic metadata, original keywords, normalized tags, aliases,
+   and optional Obsidian links. Prefer original keywords for author-provided terminology.
+5. Formulae and tables in Markdown should be treated as structured extracted content, but
    critical exact values should still be verified against the original PDF when needed.
-5. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
-6. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
+6. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
+7. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
    when a visually encoded table/figure cannot be resolved reliably from Markdown.
-7. `bib/pdf/*.pdf` is the source of truth.
-8. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
+8. `bib/pdf/*.pdf` is the source of truth.
+9. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
    visibly corrupted extraction; verify it against the PDF.
 """
 
@@ -2135,6 +2137,11 @@ def main() -> int:
         print(f"Model cache     : {artifacts_path}")
         print(f"Bundle          : {'no' if args.no_bundle else 'bib/bundle.md'}")
         print(f"Rename PDFs     : {'yes' if args.rename_pdfs else 'no'}")
+        print(f"Metadata YAML   : {'yes' if args.metadata else 'no'}")
+        print(f"PDF metadata    : {'yes' if args.write_pdf_metadata else 'no'}")
+        print(f"Obsidian        : {'yes' if args.obsidian else 'no'}")
+        if args.obsidian_vault is not None:
+            print(f"Obsidian vault  : {args.obsidian_vault}")
         print("Page markers    : yes")
         print("Reference split : " + ("no" if args.no_reference_split else "yes"))
         print("=" * 80)
