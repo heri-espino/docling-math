@@ -50,7 +50,11 @@ from docling.document_converter import (
 )
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 
+from .markdown_metadata import enrich_markdown_file, enrich_markdown_text, update_related_papers
+from .metadata import PaperMetadata, infer_paper_metadata
 from .naming import infer_paper_identity
+from .obsidian_vault import sync_obsidian_vault
+from .pdf_metadata import write_pdf_metadata
 
 
 # =============================================================================
@@ -268,6 +272,39 @@ def parse_args() -> argparse.Namespace:
             "Renombra PDFs y outputs como Author1_Author2-Year-Title_of_article. "
             "Sólo renombra cuando puede inferir autores, año y título."
         ),
+    )
+    parser.add_argument(
+        "--metadata",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Añade metadata bibliográfica, keywords, tags y aliases al YAML. Default: sí.",
+    )
+    parser.add_argument(
+        "--refresh-metadata",
+        action="store_true",
+        help="Actualiza metadata de Markdown ya extraídos sin volver a ejecutar OCR.",
+    )
+    parser.add_argument(
+        "--write-pdf-metadata",
+        action="store_true",
+        help="Escribe Title/Author/Keywords y XMP dentro del PDF. Modifica el PDF fuente.",
+    )
+    parser.add_argument(
+        "--obsidian",
+        action="store_true",
+        help="Añade propiedades Obsidian, wikilink al PDF y relaciones entre papers.",
+    )
+    parser.add_argument(
+        "--related-papers",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Con --obsidian, genera hasta 5 enlaces related por tags compartidos.",
+    )
+    parser.add_argument(
+        "--obsidian-vault",
+        type=Path,
+        default=None,
+        help="Sincroniza una copia Obsidian-ready al vault indicado.",
     )
     parser.add_argument(
         "--no-bundle",
@@ -1451,6 +1488,9 @@ def finalize_markdown(
     asset_stats: AssetStats,
     split_references: bool,
     assets_enabled: bool,
+    paper_metadata: PaperMetadata,
+    metadata_enabled: bool,
+    obsidian: bool,
 ) -> Path | None:
     body = number_page_breaks(winner.markdown)
 
@@ -1482,7 +1522,16 @@ def finalize_markdown(
         asset_stats=asset_stats,
         assets_enabled=assets_enabled,
     )
-    write_atomic(md_path, front + body)
+    final_text = front + body
+    if metadata_enabled or obsidian:
+        final_text = enrich_markdown_text(
+            final_text,
+            paper_id=pdf_path.stem,
+            pdf_name=pdf_path.name,
+            metadata=paper_metadata,
+            obsidian=obsidian,
+        )
+    write_atomic(md_path, final_text)
     return refs_path
 
 
@@ -1565,6 +1614,9 @@ def build_index_block(
 ) -> str:
     title = derive_title(md_path, pdf_path.stem)
     headings = extract_index_headings(md_path)
+    metadata = infer_paper_metadata(
+        md_path.read_text(encoding="utf-8", errors="replace")
+    )
 
     lines = [
         f"### {title}",
@@ -1574,6 +1626,19 @@ def build_index_block(
         f"- Extraction: `{winner.mode}`",
         f"- Quality: `{winner.diagnostics.grade}` ({winner.combined_score:.1f})",
     ]
+
+    if metadata.authors:
+        lines.append("- Authors: " + "; ".join(metadata.authors))
+    if metadata.year is not None:
+        lines.append(f"- Year: {metadata.year}")
+    if metadata.journal:
+        lines.append(f"- Journal: {metadata.journal}")
+    if metadata.doi:
+        lines.append(f"- DOI: {metadata.doi}")
+    if metadata.keywords:
+        lines.append("- Keywords: " + "; ".join(metadata.keywords))
+    if metadata.tags:
+        lines.append("- Tags: " + ", ".join(metadata.tags))
 
     if assets_enabled:
         lines.extend(
@@ -1715,16 +1780,26 @@ def build_bundle(
         pdf_path = pdf_by_stem[md_path.stem]
         refs_path = refs_dir / f"{md_path.stem}.references.md"
         headings = extract_index_headings(md_path, limit=6)
+        raw = md_path.read_text(encoding="utf-8", errors="replace")
+        metadata = infer_paper_metadata(raw)
 
         lines.append(
             f"{index}. **{paper_id} — {title}**  "
             f"(Markdown: extracted/{md_path.name}; PDF: pdf/{pdf_path.name})"
         )
+        if metadata.authors:
+            lines.append("   - Authors: " + "; ".join(metadata.authors))
+        if metadata.year is not None:
+            lines.append(f"   - Year: {metadata.year}")
+        if metadata.keywords:
+            lines.append("   - Keywords: " + "; ".join(metadata.keywords))
+        if metadata.tags:
+            lines.append("   - Tags: " + ", ".join(metadata.tags))
+
         useful = [h for h in headings if h.casefold() != title.casefold()][:5]
         if useful:
             lines.append("   - Sections: " + " · ".join(useful))
 
-        raw = md_path.read_text(encoding="utf-8", errors="replace")
         body = strip_front_matter(raw).strip()
 
         block = [
@@ -1736,6 +1811,18 @@ def build_bundle(
             f"- Source Markdown: extracted/{md_path.name}",
             f"- Source PDF: pdf/{pdf_path.name}",
         ]
+        if metadata.authors:
+            block.append("- Authors: " + "; ".join(metadata.authors))
+        if metadata.year is not None:
+            block.append(f"- Year: {metadata.year}")
+        if metadata.journal:
+            block.append(f"- Journal: {metadata.journal}")
+        if metadata.doi:
+            block.append(f"- DOI: {metadata.doi}")
+        if metadata.keywords:
+            block.append("- Keywords: " + "; ".join(metadata.keywords))
+        if metadata.tags:
+            block.append("- Tags: " + ", ".join(metadata.tags))
         if refs_path.exists():
             block.append(f"- References: references/{refs_path.name}")
         block.extend(
@@ -1790,13 +1877,15 @@ This directory is optimized for high-fidelity, low-context academic retrieval.
 1. Start with `bib/INDEX.md`; identify only the relevant papers.
 2. Use `bib/bundle.md` for whole-corpus review or when one file is easier to pass to an AI.
 3. Read/search `bib/extracted/*.md` first for targeted retrieval. Markdown is the primary retrieval layer.
-4. Formulae and tables in Markdown should be treated as structured extracted content, but
+4. YAML properties contain bibliographic metadata, original keywords, normalized tags, aliases,
+   and optional Obsidian links. Prefer original keywords for author-provided terminology.
+5. Formulae and tables in Markdown should be treated as structured extracted content, but
    critical exact values should still be verified against the original PDF when needed.
-5. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
-6. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
+6. `bib/references/` is split out to reduce retrieval noise; search it for citation chaining.
+7. `bib/assets/` exists only when extraction was run with `--assets`. Use a targeted crop
    when a visually encoded table/figure cannot be resolved reliably from Markdown.
-7. `bib/pdf/*.pdf` is the source of truth.
-8. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
+8. `bib/pdf/*.pdf` is the source of truth.
+9. Never infer a coefficient, p-value, confidence interval, sample size, or effect size from
    visibly corrupted extraction; verify it against the PDF.
 """
 
@@ -1886,6 +1975,12 @@ def process_one_pdf(
             f"{winner.combined_score:.1f} ({winner.diagnostics.grade})"
         )
 
+        paper_metadata = infer_paper_metadata(winner.markdown)
+        if paper_metadata.title:
+            print(f"  [METADATA] title={paper_metadata.title}")
+        if paper_metadata.keywords:
+            print(f"  [METADATA] keywords={len(paper_metadata.keywords)} tags={len(paper_metadata.tags)}")
+
         if args.rename_pdfs:
             pdf_path, md_path, renamed = rename_corpus_entry(
                 pdf_path=pdf_path,
@@ -1895,6 +1990,10 @@ def process_one_pdf(
                 index_path=index_path,
                 markdown_for_identity=winner.markdown,
             )
+
+        if args.write_pdf_metadata:
+            if write_pdf_metadata(pdf_path, paper_metadata):
+                print("  [PDF-METADATA] Info + XMP updated")
 
         assets_dir = assets_root / pdf_path.stem
         if args.assets:
@@ -1917,6 +2016,9 @@ def process_one_pdf(
             asset_stats=stats,
             split_references=not args.no_reference_split,
             assets_enabled=args.assets,
+            paper_metadata=paper_metadata,
+            metadata_enabled=args.metadata,
+            obsidian=args.obsidian,
         )
 
         if not args.no_index:
@@ -1953,6 +2055,8 @@ def process_one_pdf(
 
 def main() -> int:
     args = parse_args()
+    if args.obsidian_vault is not None:
+        args.obsidian = True
 
     if args.threads < 1:
         print("[ERROR] --threads debe ser >= 1", file=sys.stderr)
@@ -1986,14 +2090,26 @@ def main() -> int:
             print(f"[ERROR] No se encontraron PDFs en {pdf_dir}", file=sys.stderr)
             return 1
 
-        ensure_model_cache(
-            artifacts_path=artifacts_path,
-            layout_preset=args.layout_preset,
-            refresh=args.refresh_models,
+        extraction_needed = any(
+            needs_processing(
+                pdf_path,
+                extracted_dir / f"{pdf_path.stem}.md",
+                args.force,
+            )
+            for pdf_path in pdfs
         )
 
-        # Resolve once so CPU confirmation can never repeat once per paper.
-        device = resolve_device(args.device)
+        device: AcceleratorDevice | None = None
+        if extraction_needed:
+            ensure_model_cache(
+                artifacts_path=artifacts_path,
+                layout_preset=args.layout_preset,
+                refresh=args.refresh_models,
+            )
+            # Resolve once so CPU confirmation can never repeat once per paper.
+            device = resolve_device(args.device)
+        else:
+            print("[DEVICE] no extraction needed; skipping model/GPU initialization")
 
         if not args.no_agents:
             ensure_agents_file(agents_path)
@@ -2012,7 +2128,7 @@ def main() -> int:
         print(f"Repo            : {repo}")
         print(f"PDFs            : {len(pdfs)}")
         print(f"Strategy        : {args.strategy}")
-        print(f"Device          : {device}")
+        print(f"Device          : {device if device is not None else 'not needed'}")
         print(f"OCR             : RapidOCR/{args.ocr_backend} lang={args.ocr_lang}")
         print(f"Layout          : {args.layout_preset}")
         print(f"Math            : {'CodeFormulaV2' if args.math else 'off'}")
@@ -2021,6 +2137,11 @@ def main() -> int:
         print(f"Model cache     : {artifacts_path}")
         print(f"Bundle          : {'no' if args.no_bundle else 'bib/bundle.md'}")
         print(f"Rename PDFs     : {'yes' if args.rename_pdfs else 'no'}")
+        print(f"Metadata YAML   : {'yes' if args.metadata else 'no'}")
+        print(f"PDF metadata    : {'yes' if args.write_pdf_metadata else 'no'}")
+        print(f"Obsidian        : {'yes' if args.obsidian else 'no'}")
+        if args.obsidian_vault is not None:
+            print(f"Obsidian vault  : {args.obsidian_vault}")
         print("Page markers    : yes")
         print("Reference split : " + ("no" if args.no_reference_split else "yes"))
         print("=" * 80)
@@ -2033,11 +2154,13 @@ def main() -> int:
             print(f"\n[{idx:02d}/{len(pdfs):02d}]", end="")
 
             if not needs_processing(pdf_path, md_path, args.force):
-                if args.rename_pdfs and md_path.exists():
-                    existing_markdown = md_path.read_text(
-                        encoding="utf-8",
-                        errors="replace",
-                    )
+                existing_markdown = (
+                    md_path.read_text(encoding="utf-8", errors="replace")
+                    if md_path.exists()
+                    else ""
+                )
+
+                if args.rename_pdfs and existing_markdown:
                     pdf_path, md_path, did_rename = rename_corpus_entry(
                         pdf_path=pdf_path,
                         md_path=md_path,
@@ -2048,10 +2171,40 @@ def main() -> int:
                     )
                     if did_rename:
                         renamed += 1
+                        existing_markdown = md_path.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        )
+
+                if existing_markdown and (
+                    args.refresh_metadata
+                    or args.obsidian
+                    or args.write_pdf_metadata
+                ):
+                    paper_metadata = infer_paper_metadata(existing_markdown)
+
+                    if args.write_pdf_metadata:
+                        if write_pdf_metadata(pdf_path, paper_metadata):
+                            print(" [PDF-METADATA] Info + XMP updated")
+
+                    if args.refresh_metadata or args.obsidian or (
+                        args.write_pdf_metadata and args.metadata
+                    ):
+                        enrich_markdown_file(
+                            md_path,
+                            pdf_name=pdf_path.name,
+                            obsidian=args.obsidian,
+                        )
+                        print(" [METADATA] Markdown properties refreshed")
+                    elif args.write_pdf_metadata:
+                        # Keep extraction freshness after an intentional PDF metadata rewrite.
+                        write_atomic(md_path, existing_markdown)
+
                 print(f" [SKIP] extraction: {pdf_path.name}")
                 skipped += 1
                 continue
 
+            assert device is not None
             success, did_rename = process_one_pdf(
                 pdf_path=pdf_path,
                 md_path=md_path,
@@ -2069,6 +2222,10 @@ def main() -> int:
             else:
                 failed += 1
 
+        if args.obsidian and args.related_papers:
+            related_changed = update_related_papers(extracted_dir)
+            print(f"[OBSIDIAN] related links updated in {related_changed} note(s)")
+
         if not args.no_bundle:
             build_bundle(
                 extracted_dir=extracted_dir,
@@ -2076,6 +2233,16 @@ def main() -> int:
                 refs_dir=refs_dir,
                 bundle_path=bundle_path,
                 include_references=args.bundle_references,
+            )
+
+        if args.obsidian_vault is not None:
+            notes, pdf_copies = sync_obsidian_vault(
+                bib_dir=bib,
+                vault_dir=args.obsidian_vault,
+            )
+            print(
+                f"[OBSIDIAN] vault synced: {notes} note(s), "
+                f"{pdf_copies} PDF(s) -> {args.obsidian_vault}"
             )
 
         elapsed = time.perf_counter() - start_total

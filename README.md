@@ -10,6 +10,8 @@ The default profile is optimized for mathematics-heavy papers:
 - **TableFormer ACCURATE** table reconstruction;
 - page provenance markers such as `<!-- p:12 -->`;
 - optional split of late References/Bibliography sections;
+- bibliographic YAML properties, original keywords, normalized tags, and aliases;
+- optional PDF Info/XMP metadata and Obsidian integration;
 - **no persisted figures or table PNGs by default**.
 
 Use `--assets` only when you want visual fallbacks.
@@ -125,7 +127,10 @@ assets       off
 references   split
 page markers on
 bundle       on  (bib/bundle.md)
+metadata     on  (YAML + keywords + tags + aliases)
 rename PDFs  off
+PDF metadata off
+Obsidian     off
 model cache  ~/.cache/docling/models
 ```
 
@@ -167,6 +172,133 @@ Include those bibliographies when you need citation chaining:
 Disable bundle generation:
 
     docling-math --no-bundle
+
+## Bibliographic metadata and tags
+
+Every newly extracted Markdown note receives structured YAML metadata by default. The same
+`PaperMetadata` object is used by canonical filenames, Markdown properties, PDF metadata,
+the index, the AI bundle, and the future GUI.
+
+When available, docling-math records:
+
+```yaml
+---
+id: CortesToto_Espino-2011-Estimacion_de_tendencia
+title: Estimacion de tendencia
+authors:
+  - Daniela Cortes-Toto
+  - Heriberto Espino
+year: 2011
+journal: Journal of Trend Research
+doi: 10.1234/example
+keywords:
+  - Trend estimation
+  - Time series analysis
+tags:
+  - literature
+  - year/2011
+  - author/cortestoto
+  - author/espino
+  - trend-estimation
+  - time-series
+aliases:
+  - Estimacion de tendencia
+topics:
+  - time-series
+  - trend-estimation
+source_pdf: ../pdf/CortesToto_Espino-2011-Estimacion_de_tendencia.pdf
+...
+---
+```
+
+`keywords` preserve author-provided terminology from the paper. `tags` are normalized
+library labels for retrieval and Obsidian. Tags are intentionally conservative: literature,
+publication year, up to two authors, and up to five topic tags derived from original
+keywords.
+
+Disable metadata on new Markdown outputs:
+
+```powershell
+docling-math --no-metadata
+```
+
+Upgrade already-extracted Markdown without re-running OCR or loading GPU models:
+
+```powershell
+docling-math --refresh-metadata
+```
+
+## Embedded PDF metadata
+
+PDF modification is opt-in because the source PDF is otherwise treated as immutable:
+
+```powershell
+docling-math --write-pdf-metadata
+```
+
+This writes regular PDF Info metadata and XMP metadata while preserving the document pages.
+Fields include title, authors, publication year, journal, DOI, original keywords, normalized
+tags, and the abstract when available.
+
+This operation rewrites the PDF container. Do not use it when you need to preserve an
+existing digital signature byte-for-byte; rewriting a signed PDF can invalidate its
+signature.
+
+Because an intentional PDF metadata rewrite changes the PDF modification time, docling-math
+refreshes the companion Markdown afterwards so it does not trigger unnecessary extraction on
+the next run.
+
+## Obsidian integration
+
+Enable Obsidian-ready properties and wikilinks:
+
+```powershell
+docling-math --obsidian
+```
+
+This adds a PDF wikilink and the `literature-note` CSS class. By default it also computes
+up to five `related` links between papers that share normalized topic tags:
+
+```yaml
+pdf: "[[CortesToto_Espino-2011-Estimacion_de_tendencia.pdf]]"
+related:
+  - "[[Smith_Jones-2014-Time_series_smoothing]]"
+```
+
+Disable relationship generation while keeping the other Obsidian properties:
+
+```powershell
+docling-math --obsidian --no-related-papers
+```
+
+Existing notes are upgraded without OCR when `--obsidian` is used.
+
+To maintain a ready-to-open copy inside an Obsidian vault:
+
+```powershell
+docling-math --obsidian-vault "C:\Users\Heri\Documents\Obsidian Vault"
+```
+
+This creates or updates:
+
+```text
+Obsidian Vault/
+└─ Literature/
+   ├─ Paper_A.md
+   ├─ Paper_B.md
+   ├─ References/
+   ├─ _Index.md
+   ├─ _Bundle.md
+   └─ Attachments/
+      ├─ PDFs/
+      │  ├─ Paper_A.pdf
+      │  └─ Paper_B.pdf
+      └─ Assets/
+```
+
+The vault option implies `--obsidian`. The copied notes rewrite their provenance paths to
+the vault mirror, so PDF, split-reference, and optional asset links remain valid there. It
+copies only managed literature files and does not delete or modify unrelated vault content.
 
 ## Optional canonical PDF names
 
@@ -322,6 +454,30 @@ Rename PDFs using inferred academic metadata:
 
 ```powershell
 docling-math --rename-pdfs
+```
+
+Refresh metadata without OCR:
+
+```powershell
+docling-math --refresh-metadata
+```
+
+Write metadata inside PDFs:
+
+```powershell
+docling-math --write-pdf-metadata
+```
+
+Prepare notes for Obsidian:
+
+```powershell
+docling-math --obsidian
+```
+
+Sync into an Obsidian vault:
+
+```powershell
+docling-math --obsidian-vault "C:\path\to\Obsidian Vault"
 ```
 
 Use another project explicitly:
