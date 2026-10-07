@@ -300,6 +300,8 @@ def rewrite_markdown_text(text: str, pairs: tuple[RenamePair, ...]) -> str:
                 (f"{pair.old_stem}.references.md", f"{pair.new_stem}.references.md"),
                 (f"{pair.old_stem}.md", f"{pair.new_stem}.md"),
                 (pair.old_pdf, pair.new_pdf),
+                (f"[[{pair.old_stem}]]", f"[[{pair.new_stem}]]"),
+                (f"[[{pair.old_stem}|", f"[[{pair.new_stem}|"),
                 (f"assets/{pair.old_stem}", f"assets/{pair.new_stem}"),
                 (f"assets\\{pair.old_stem}", f"assets\\{pair.new_stem}"),
             ]
