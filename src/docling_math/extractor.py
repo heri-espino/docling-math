@@ -2050,14 +2050,26 @@ def main() -> int:
             print(f"[ERROR] No se encontraron PDFs en {pdf_dir}", file=sys.stderr)
             return 1
 
-        ensure_model_cache(
-            artifacts_path=artifacts_path,
-            layout_preset=args.layout_preset,
-            refresh=args.refresh_models,
+        extraction_needed = any(
+            needs_processing(
+                pdf_path,
+                extracted_dir / f"{pdf_path.stem}.md",
+                args.force,
+            )
+            for pdf_path in pdfs
         )
 
-        # Resolve once so CPU confirmation can never repeat once per paper.
-        device = resolve_device(args.device)
+        device: AcceleratorDevice | None = None
+        if extraction_needed:
+            ensure_model_cache(
+                artifacts_path=artifacts_path,
+                layout_preset=args.layout_preset,
+                refresh=args.refresh_models,
+            )
+            # Resolve once so CPU confirmation can never repeat once per paper.
+            device = resolve_device(args.device)
+        else:
+            print("[DEVICE] no extraction needed; skipping model/GPU initialization")
 
         if not args.no_agents:
             ensure_agents_file(agents_path)
@@ -2076,7 +2088,7 @@ def main() -> int:
         print(f"Repo            : {repo}")
         print(f"PDFs            : {len(pdfs)}")
         print(f"Strategy        : {args.strategy}")
-        print(f"Device          : {device}")
+        print(f"Device          : {device if device is not None else 'not needed'}")
         print(f"OCR             : RapidOCR/{args.ocr_backend} lang={args.ocr_lang}")
         print(f"Layout          : {args.layout_preset}")
         print(f"Math            : {'CodeFormulaV2' if args.math else 'off'}")
@@ -2097,11 +2109,13 @@ def main() -> int:
             print(f"\n[{idx:02d}/{len(pdfs):02d}]", end="")
 
             if not needs_processing(pdf_path, md_path, args.force):
-                if args.rename_pdfs and md_path.exists():
-                    existing_markdown = md_path.read_text(
-                        encoding="utf-8",
-                        errors="replace",
-                    )
+                existing_markdown = (
+                    md_path.read_text(encoding="utf-8", errors="replace")
+                    if md_path.exists()
+                    else ""
+                )
+
+                if args.rename_pdfs and existing_markdown:
                     pdf_path, md_path, did_rename = rename_corpus_entry(
                         pdf_path=pdf_path,
                         md_path=md_path,
@@ -2112,10 +2126,40 @@ def main() -> int:
                     )
                     if did_rename:
                         renamed += 1
+                        existing_markdown = md_path.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        )
+
+                if existing_markdown and (
+                    args.refresh_metadata
+                    or args.obsidian
+                    or args.write_pdf_metadata
+                ):
+                    paper_metadata = infer_paper_metadata(existing_markdown)
+
+                    if args.write_pdf_metadata:
+                        if write_pdf_metadata(pdf_path, paper_metadata):
+                            print(" [PDF-METADATA] Info + XMP updated")
+
+                    if args.refresh_metadata or args.obsidian or (
+                        args.write_pdf_metadata and args.metadata
+                    ):
+                        enrich_markdown_file(
+                            md_path,
+                            pdf_name=pdf_path.name,
+                            obsidian=args.obsidian,
+                        )
+                        print(" [METADATA] Markdown properties refreshed")
+                    elif args.write_pdf_metadata:
+                        # Keep extraction freshness after an intentional PDF metadata rewrite.
+                        write_atomic(md_path, existing_markdown)
+
                 print(f" [SKIP] extraction: {pdf_path.name}")
                 skipped += 1
                 continue
 
+            assert device is not None
             success, did_rename = process_one_pdf(
                 pdf_path=pdf_path,
                 md_path=md_path,
@@ -2133,6 +2177,10 @@ def main() -> int:
             else:
                 failed += 1
 
+        if args.obsidian and args.related_papers:
+            related_changed = update_related_papers(extracted_dir)
+            print(f"[OBSIDIAN] related links updated in {related_changed} note(s)")
+
         if not args.no_bundle:
             build_bundle(
                 extracted_dir=extracted_dir,
@@ -2140,6 +2188,16 @@ def main() -> int:
                 refs_dir=refs_dir,
                 bundle_path=bundle_path,
                 include_references=args.bundle_references,
+            )
+
+        if args.obsidian_vault is not None:
+            notes, pdf_copies = sync_obsidian_vault(
+                bib_dir=bib,
+                vault_dir=args.obsidian_vault,
+            )
+            print(
+                f"[OBSIDIAN] vault synced: {notes} note(s), "
+                f"{pdf_copies} PDF(s) -> {args.obsidian_vault}"
             )
 
         elapsed = time.perf_counter() - start_total
