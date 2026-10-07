@@ -286,15 +286,19 @@ Obsidian Vault/
 └─ Literature/
    ├─ Paper_A.md
    ├─ Paper_B.md
+   ├─ References/
    ├─ _Index.md
    ├─ _Bundle.md
    └─ Attachments/
-      ├─ Paper_A.pdf
-      └─ Paper_B.pdf
+      ├─ PDFs/
+      │  ├─ Paper_A.pdf
+      │  └─ Paper_B.pdf
+      └─ Assets/
 ```
 
-The vault option implies `--obsidian`. It copies only the managed literature files and
-does not delete or modify unrelated vault content.
+The vault option implies `--obsidian`. The copied notes rewrite their provenance paths to
+the vault mirror, so PDF, split-reference, and optional asset links remain valid there. It
+copies only managed literature files and does not delete or modify unrelated vault content.
 
 ## Optional canonical PDF names
 
