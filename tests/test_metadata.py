@@ -193,11 +193,12 @@ def test_obsidian_vault_sync_copies_notes_and_pdfs(tmp_path: Path):
 
     assert (notes, pdfs) == (1, 1)
     copied_note = vault / "Literature" / f"{stem}.md"
-    copied_pdf = vault / "Literature" / "Attachments" / f"{stem}.pdf"
+    copied_pdf = vault / "Literature" / "Attachments" / "PDFs" / f"{stem}.pdf"
     assert copied_note.exists()
     assert copied_pdf.exists()
     assert (vault / "Literature" / "_Index.md").exists()
     assert (vault / "Literature" / "_Bundle.md").exists()
 
     front = _front(copied_note.read_text(encoding="utf-8"))
-    assert front["pdf"] == f"[[Attachments/{stem}.pdf]]"
+    assert front["pdf"] == f"[[Attachments/PDFs/{stem}.pdf]]"
+    assert front["source_pdf"] == f"Attachments/PDFs/{stem}.pdf"
