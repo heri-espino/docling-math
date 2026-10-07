@@ -17,10 +17,14 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q src
 
-      - name: Test naming and literature rename tools
+      - name: Test metadata, naming, and literature tools
         run: |
-          python -m pip install pytest
-          PYTHONPATH=src python -m pytest -q tests/test_naming.py tests/test_rename_literature.py
+          python -m pip install pytest pyyaml "pypdf>=6.7,<7"
+          PYTHONPATH=src python -m pytest -q \
+            tests/test_metadata.py \
+            tests/test_pdf_metadata.py \
+            tests/test_naming.py \
+            tests/test_rename_literature.py
 
       - name: Build package
         run: |
