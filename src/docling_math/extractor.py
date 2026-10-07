@@ -1487,6 +1487,9 @@ def finalize_markdown(
     asset_stats: AssetStats,
     split_references: bool,
     assets_enabled: bool,
+    paper_metadata: PaperMetadata,
+    metadata_enabled: bool,
+    obsidian: bool,
 ) -> Path | None:
     body = number_page_breaks(winner.markdown)
 
@@ -1518,7 +1521,16 @@ def finalize_markdown(
         asset_stats=asset_stats,
         assets_enabled=assets_enabled,
     )
-    write_atomic(md_path, front + body)
+    final_text = front + body
+    if metadata_enabled or obsidian:
+        final_text = enrich_markdown_text(
+            final_text,
+            paper_id=pdf_path.stem,
+            pdf_name=pdf_path.name,
+            metadata=paper_metadata,
+            obsidian=obsidian,
+        )
+    write_atomic(md_path, final_text)
     return refs_path
 
 
