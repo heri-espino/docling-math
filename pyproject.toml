@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docling-math"
-version = "0.4.0"
+version = "0.5.0"
 description = "GPU-first, high-fidelity academic PDF extraction with careful math and tables."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -15,6 +15,8 @@ authors = [
 dependencies = [
   "docling[rapidocr]==2.129.0",
   "pillow>=10",
+  "pypdf>=6.7,<7",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
