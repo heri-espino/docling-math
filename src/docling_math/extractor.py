@@ -1614,6 +1614,9 @@ def build_index_block(
 ) -> str:
     title = derive_title(md_path, pdf_path.stem)
     headings = extract_index_headings(md_path)
+    metadata = infer_paper_metadata(
+        md_path.read_text(encoding="utf-8", errors="replace")
+    )
 
     lines = [
         f"### {title}",
@@ -1623,6 +1626,19 @@ def build_index_block(
         f"- Extraction: `{winner.mode}`",
         f"- Quality: `{winner.diagnostics.grade}` ({winner.combined_score:.1f})",
     ]
+
+    if metadata.authors:
+        lines.append("- Authors: " + "; ".join(metadata.authors))
+    if metadata.year is not None:
+        lines.append(f"- Year: {metadata.year}")
+    if metadata.journal:
+        lines.append(f"- Journal: {metadata.journal}")
+    if metadata.doi:
+        lines.append(f"- DOI: {metadata.doi}")
+    if metadata.keywords:
+        lines.append("- Keywords: " + "; ".join(metadata.keywords))
+    if metadata.tags:
+        lines.append("- Tags: " + ", ".join(metadata.tags))
 
     if assets_enabled:
         lines.extend(
