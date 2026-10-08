@@ -4,6 +4,7 @@ import yaml
 
 from docling_math.markdown_metadata import (
     enrich_markdown_text,
+    enrich_reference_markdown_text,
     update_related_papers,
 )
 from docling_math.metadata import canonical_stem, infer_paper_metadata
@@ -202,3 +203,33 @@ def test_obsidian_vault_sync_copies_notes_and_pdfs(tmp_path: Path):
     front = _front(copied_note.read_text(encoding="utf-8"))
     assert front["pdf"] == f"[[Attachments/PDFs/{stem}.pdf]]"
     assert front["source_pdf"] == f"Attachments/PDFs/{stem}.pdf"
+
+
+def test_reference_markdown_inherits_parent_metadata():
+    metadata = infer_paper_metadata(SAMPLE)
+    refs = """---
+id: old-references
+source_pdf: ../pdf/old.pdf
+---
+# References
+
+Reference A.
+"""
+
+    enriched = enrich_reference_markdown_text(
+        refs,
+        paper_id="CortesToto_Espino-2011-Estimacion_de_tendencia",
+        pdf_name="CortesToto_Espino-2011-Estimacion_de_tendencia.pdf",
+        paper_metadata=metadata,
+        obsidian=True,
+    )
+    front = _front(enriched)
+
+    assert front["content"] == "references-only"
+    assert front["paper_title"] == "Estimacion de tendencia"
+    assert front["authors"] == ["Daniela Cortes-Toto", "Heriberto Espino"]
+    assert front["year"] == 2011
+    assert front["paper"] == "[[CortesToto_Espino-2011-Estimacion_de_tendencia]]"
+    assert front["pdf"] == "[[CortesToto_Espino-2011-Estimacion_de_tendencia.pdf]]"
+    assert "references" in front["tags"]
+    assert "Reference A." in enriched
