@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -533,32 +534,46 @@ class DesktopWindow:
     def _run_steps(self, steps: tuple[WorkerStep, ...], allow_cpu: bool) -> None:
         success = True
         try:
-            for step in steps:
-                if self.cancel_requested.is_set():
-                    success = False
-                    break
-                self.messages.put(("label", step.label))
-                command = worker_command(step)
-                kwargs = hidden_process_kwargs(allow_cpu=allow_cpu and step.kind == "extract")
-                self.process = subprocess.Popen(command, **kwargs)
+            with tempfile.TemporaryDirectory(prefix="docling-math-job-") as work:
+                for index, step in enumerate(steps):
+                    if self.cancel_requested.is_set():
+                        success = False
+                        break
 
-                # User explicitly enabled CPU fallback in the GUI. Feed one confirmation
-                # only to extraction worker; never silently opt in otherwise.
-                if allow_cpu and step.kind == "extract" and self.process.stdin:
-                    self.process.stdin.write("y\n")
-                    self.process.stdin.flush()
+                    self.messages.put(("label", step.label))
+                    command = worker_command(step)
+                    log_path = Path(work) / f"step-{index}.log"
+                    log_path.touch()
+                    kwargs = hidden_process_kwargs(
+                        log_path=log_path,
+                        allow_cpu=allow_cpu and step.kind == "extract",
+                    )
+                    self.process = subprocess.Popen(command, **kwargs)
 
-                if self.process.stdout is not None:
-                    for line in self.process.stdout:
-                        self.messages.put(("log", line))
+                    # Stream the worker's log into the GUI. Frozen windowed exes may
+                    # have no stdout/stderr, so workers write to the log file directly.
+                    with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+                        while True:
+                            line = handle.readline()
+                            if line:
+                                self.messages.put(("log", line))
+                                continue
+                            if self.process.poll() is not None:
+                                remaining = handle.read()
+                                if remaining:
+                                    self.messages.put(("log", remaining))
+                                break
+                            time.sleep(0.12)
 
-                code = self.process.wait()
-                self.process = None
-                if code != 0:
-                    self.messages.put(("log", f"\n[FAILED] {step.label}: exit code {code}\n"))
-                    success = False
-                    break
-                self.messages.put(("log", f"\n[OK] {step.label}\n"))
+                    code = self.process.wait()
+                    self.process = None
+                    if code != 0:
+                        self.messages.put(
+                            ("log", f"\n[FAILED] {step.label}: exit code {code}\n")
+                        )
+                        success = False
+                        break
+                    self.messages.put(("log", f"\n[OK] {step.label}\n"))
         except Exception as exc:
             success = False
             self.messages.put(("log", f"\n[ERROR] {type(exc).__name__}: {exc}\n"))
