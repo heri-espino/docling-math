@@ -25,7 +25,8 @@ jobs:
             tests/test_pdf_metadata.py \
             tests/test_naming.py \
             tests/test_rename_literature.py \
-            tests/test_corpus_upgrade.py
+            tests/test_corpus_upgrade.py \
+            tests/test_desktop.py
 
       - name: Build package
         run: |
