@@ -103,6 +103,67 @@ def enrich_markdown_text(
     return f"---\n{dumped}\n---\n\n{body.lstrip()}"
 
 
+def enrich_reference_markdown_text(
+    markdown: str,
+    *,
+    paper_id: str,
+    pdf_name: str,
+    paper_metadata: PaperMetadata,
+    obsidian: bool = False,
+) -> str:
+    """Enrich a split references note while preserving its bibliography body."""
+    existing, body = split_front_matter(markdown)
+
+    front: dict[str, Any] = {}
+    front["id"] = f"{paper_id}-references"
+    front["content"] = "references-only"
+    front["paper_id"] = paper_id
+    if paper_metadata.title:
+        front["paper_title"] = paper_metadata.title
+    if paper_metadata.authors:
+        front["authors"] = list(paper_metadata.authors)
+    if paper_metadata.year is not None:
+        front["year"] = paper_metadata.year
+    if paper_metadata.journal:
+        front["journal"] = paper_metadata.journal
+    if paper_metadata.doi:
+        front["doi"] = paper_metadata.doi
+    if paper_metadata.keywords:
+        front["keywords"] = list(paper_metadata.keywords)
+
+    tags = list(paper_metadata.tags)
+    if "references" not in tags:
+        tags.append("references")
+    if tags:
+        front["tags"] = tags
+
+    front["source_pdf"] = f"../pdf/{pdf_name}"
+    front["source_markdown"] = f"../extracted/{paper_id}.md"
+
+    if obsidian:
+        front["paper"] = f"[[{paper_id}]]"
+        front["pdf"] = f"[[{pdf_name}]]"
+        css = existing.get("cssclasses")
+        classes = list(css) if isinstance(css, list) else []
+        if "literature-references" not in classes:
+            classes.append("literature-references")
+        front["cssclasses"] = classes
+
+    owned = set(front)
+    for key, value in existing.items():
+        if key in owned:
+            continue
+        front[key] = value
+
+    dumped = yaml.safe_dump(
+        front,
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+        width=1000,
+    ).rstrip()
+    return f"---\n{dumped}\n---\n\n{body.lstrip()}"
+
 def enrich_markdown_file(
     path: Path,
     *,
