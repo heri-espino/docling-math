@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .markdown_metadata import enrich_markdown_text, update_related_papers
+from .markdown_metadata import (
+    enrich_markdown_text,
+    enrich_reference_markdown_text,
+    update_related_papers,
+)
 from .metadata import infer_paper_metadata, split_front_matter
 from .obsidian_vault import sync_obsidian_vault
 from .pdf_metadata import write_pdf_metadata
@@ -20,6 +24,8 @@ class UpgradeReport:
     corpus_dir: Path
     papers_seen: int
     markdown_updated: int
+    references_seen: int
+    references_updated: int
     pdf_metadata_updated: int
     missing_pdfs: tuple[str, ...]
     related_notes_updated: int
@@ -27,6 +33,7 @@ class UpgradeReport:
     bundle_path: Path
     obsidian_notes: int = 0
     obsidian_pdfs: int = 0
+    obsidian_vault: Path | None = None
 
 
 def resolve_corpus_dir(path: str | Path) -> Path:
@@ -100,17 +107,36 @@ def _write_atomic(path: Path, text: str) -> None:
 
 
 def _backup_managed_files(corpus_dir: Path) -> Path | None:
-    managed = [corpus_dir / "INDEX.md", corpus_dir / "bundle.md"]
-    existing = [path for path in managed if path.exists()]
-    if not existing:
+    """Snapshot every Markdown file that upgrade-corpus may rewrite."""
+    files: list[tuple[Path, Path]] = []
+
+    for name in ("INDEX.md", "bundle.md"):
+        path = corpus_dir / name
+        if path.exists():
+            files.append((path, Path(name)))
+
+    for folder in ("extracted", "references"):
+        source_dir = corpus_dir / folder
+        if not source_dir.exists():
+            continue
+        for path in source_dir.glob("*.md"):
+            files.append((path, Path(folder) / path.name))
+
+    if not files:
         return None
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     backup_dir = corpus_dir / ".backups" / f"upgrade-{timestamp}"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    for path in existing:
-        shutil.copy2(path, backup_dir / path.name)
+    for source, relative in files:
+        target = backup_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     return backup_dir
+
+
+def default_obsidian_vault(corpus_dir: Path) -> Path:
+    """Default managed vault next to bib/, not inside the corpus itself."""
+    return corpus_dir.parent / "obsidian-vault"
 
 
 def _metadata_for(path: Path):
@@ -306,29 +332,35 @@ def rebuild_bundle(
 def upgrade_corpus(
     corpus: str | Path,
     *,
-    obsidian: bool = False,
+    obsidian: bool = True,
     related_papers: bool = True,
     write_pdf_metadata_enabled: bool = False,
     obsidian_vault: str | Path | None = None,
+    create_vault: bool = True,
     include_references_in_bundle: bool = False,
 ) -> UpgradeReport:
     """Upgrade a v0.1+ corpus in place without extraction, OCR, or model loading."""
     corpus_dir = resolve_corpus_dir(corpus)
     extracted_dir = corpus_dir / "extracted"
     pdf_dir = corpus_dir / "pdf"
+    refs_dir = corpus_dir / "references"
 
     _backup_managed_files(corpus_dir)
 
     papers_seen = 0
     markdown_updated = 0
+    references_seen = 0
+    references_updated = 0
     pdf_metadata_updated = 0
     missing_pdfs: list[str] = []
+    metadata_by_stem = {}
 
     for md_path in sorted(extracted_dir.glob("*.md"), key=lambda p: p.name.casefold()):
         papers_seen += 1
         pdf_path = pdf_dir / f"{md_path.stem}.pdf"
         original = md_path.read_text(encoding="utf-8", errors="replace")
         metadata = infer_paper_metadata(original)
+        metadata_by_stem[md_path.stem] = metadata
 
         enriched = enrich_markdown_text(
             original,
@@ -351,6 +383,27 @@ def upgrade_corpus(
                 latest = md_path.read_text(encoding="utf-8", errors="replace")
                 _write_atomic(md_path, latest)
 
+    if refs_dir.exists():
+        for refs_path in sorted(refs_dir.glob("*.references.md"), key=lambda p: p.name.casefold()):
+            references_seen += 1
+            suffix = ".references.md"
+            paper_id = refs_path.name[:-len(suffix)]
+            original_refs = refs_path.read_text(encoding="utf-8", errors="replace")
+            paper_metadata = metadata_by_stem.get(paper_id)
+            if paper_metadata is None:
+                paper_metadata = infer_paper_metadata(original_refs)
+
+            enriched_refs = enrich_reference_markdown_text(
+                original_refs,
+                paper_id=paper_id,
+                pdf_name=f"{paper_id}.pdf",
+                paper_metadata=paper_metadata,
+                obsidian=obsidian,
+            )
+            if enriched_refs != original_refs:
+                _write_atomic(refs_path, enriched_refs)
+                references_updated += 1
+
     related_changed = 0
     if obsidian and related_papers:
         related_changed = update_related_papers(extracted_dir)
@@ -363,16 +416,24 @@ def upgrade_corpus(
 
     obsidian_notes = 0
     obsidian_pdfs = 0
-    if obsidian_vault is not None:
+    resolved_vault: Path | None = None
+    if create_vault:
+        resolved_vault = (
+            Path(obsidian_vault).expanduser().resolve()
+            if obsidian_vault is not None
+            else default_obsidian_vault(corpus_dir)
+        )
         obsidian_notes, obsidian_pdfs = sync_obsidian_vault(
             bib_dir=corpus_dir,
-            vault_dir=Path(obsidian_vault),
+            vault_dir=resolved_vault,
         )
 
     return UpgradeReport(
         corpus_dir=corpus_dir,
         papers_seen=papers_seen,
         markdown_updated=markdown_updated,
+        references_seen=references_seen,
+        references_updated=references_updated,
         pdf_metadata_updated=pdf_metadata_updated,
         missing_pdfs=tuple(missing_pdfs),
         related_notes_updated=related_changed,
@@ -380,6 +441,7 @@ def upgrade_corpus(
         bundle_path=bundle_path,
         obsidian_notes=obsidian_notes,
         obsidian_pdfs=obsidian_pdfs,
+        obsidian_vault=resolved_vault,
     )
 
 
@@ -399,14 +461,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Open a native folder picker instead of typing a path.",
     )
-    parser.add_argument("--obsidian", action="store_true")
+    parser.add_argument(
+        "--obsidian",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Añade propiedades Obsidian a las notas. Default: sí.",
+    )
     parser.add_argument(
         "--related-papers",
         action=argparse.BooleanOptionalAction,
         default=True,
     )
     parser.add_argument("--write-pdf-metadata", action="store_true")
-    parser.add_argument("--obsidian-vault", type=Path, default=None)
+    parser.add_argument(
+        "--vault",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Crea/actualiza un vault administrado. Default: sí, en "
+            "<project>/obsidian-vault."
+        ),
+    )
+    parser.add_argument(
+        "--obsidian-vault",
+        type=Path,
+        default=None,
+        help="Ruta personalizada del vault; implica --vault.",
+    )
     parser.add_argument("--bundle-references", action="store_true")
     return parser.parse_args(argv)
 
@@ -428,12 +509,15 @@ def print_report(report: UpgradeReport) -> None:
     print(f"Corpus             : {report.corpus_dir}")
     print(f"Papers             : {report.papers_seen}")
     print(f"Markdown updated   : {report.markdown_updated}")
+    print(f"References seen    : {report.references_seen}")
+    print(f"References updated : {report.references_updated}")
     print(f"PDF metadata       : {report.pdf_metadata_updated}")
     print(f"Related notes      : {report.related_notes_updated}")
     print(f"Missing PDFs       : {len(report.missing_pdfs)}")
     print(f"INDEX              : {report.index_path}")
     print(f"Bundle             : {report.bundle_path}")
-    if report.obsidian_notes or report.obsidian_pdfs:
+    if report.obsidian_vault is not None:
+        print(f"Obsidian vault     : {report.obsidian_vault}")
         print(
             f"Obsidian sync      : {report.obsidian_notes} notes, "
             f"{report.obsidian_pdfs} PDFs"
@@ -449,13 +533,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parse_args(argv)
         corpus_dir = resolve_cli_corpus(args)
-        obsidian = bool(args.obsidian or args.obsidian_vault is not None)
+        create_vault = bool(args.vault or args.obsidian_vault is not None)
         report = upgrade_corpus(
             corpus_dir,
-            obsidian=obsidian,
+            obsidian=args.obsidian,
             related_papers=args.related_papers,
             write_pdf_metadata_enabled=args.write_pdf_metadata,
             obsidian_vault=args.obsidian_vault,
+            create_vault=create_vault,
             include_references_in_bundle=args.bundle_references,
         )
         print_report(report)

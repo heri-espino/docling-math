@@ -194,11 +194,15 @@ docling-math --upgrade-corpus
 A normal upgrade:
 
 - reads the existing `bib/extracted/*.md`;
+- migrates every `bib/references/*.references.md` as well;
 - adds or refreshes title, authors, year, journal, DOI, keywords, tags, aliases, and topics;
-- preserves the extracted Markdown body;
+- enriches reference notes with their parent paper metadata and Obsidian links;
+- preserves both paper bodies and bibliography bodies;
 - rebuilds `INDEX.md`;
 - rebuilds `bundle.md`;
-- backs up the previous `INDEX.md` and `bundle.md` under `bib/.backups/upgrade-<timestamp>/`;
+- creates a complete backup of `extracted/*.md`, `references/*.md`, `INDEX.md`, and
+  `bundle.md` under `bib/.backups/upgrade-<timestamp>/`;
+- creates/updates an Obsidian vault by default at `<project>/obsidian-vault/`;
 - does not run Docling, OCR, CodeFormulaV2, TableFormer, CUDA, or model downloads.
 
 PDF metadata remains opt-in because it rewrites PDF containers:
@@ -207,16 +211,45 @@ PDF metadata remains opt-in because it rewrites PDF containers:
 upgrade-corpus --write-pdf-metadata
 ```
 
-Obsidian properties and related-paper links can be added during the same migration:
+Obsidian properties, related-paper links, and a managed vault are now part of the default
+upgrade. A plain:
 
 ```powershell
-upgrade-corpus --obsidian
+upgrade-corpus
 ```
 
-Or migrate and create/update the Obsidian mirror in one command:
+creates or updates:
+
+```text
+<project>/
+├─ bib/
+└─ obsidian-vault/
+   └─ Literature/
+      ├─ *.md
+      ├─ References/
+      ├─ _Index.md
+      ├─ _Bundle.md
+      └─ Attachments/
+         ├─ PDFs/
+         └─ Assets/
+```
+
+Use a different vault location:
 
 ```powershell
 upgrade-corpus --obsidian-vault "C:\Users\Heri\Documents\My Vault"
+```
+
+Disable the managed vault entirely:
+
+```powershell
+upgrade-corpus --no-vault
+```
+
+Disable Obsidian-specific properties/related links in the source corpus too:
+
+```powershell
+upgrade-corpus --no-obsidian --no-vault
 ```
 
 ### Choose exactly which folder to transform
@@ -252,14 +285,15 @@ docling-math --upgrade-corpus --select-folder
 Select the project root, `bib`, or `bib/extracted`; the tool detects the corpus
 automatically.
 
-A full migration of an old corpus can therefore be:
+A full migration of an old corpus can therefore be as simple as:
 
 ```powershell
-upgrade-corpus `
-  --select-folder `
-  --write-pdf-metadata `
-  --obsidian-vault "C:\Users\Heri\Documents\My Vault"
+upgrade-corpus --select-folder
 ```
+
+That upgrades `bib/extracted`, upgrades `bib/references`, rebuilds the managed corpus
+files, and creates the default Obsidian vault. Add `--write-pdf-metadata` only if you also
+want to rewrite PDF Info/XMP metadata.
 
 This still does not re-run extraction or OCR.
 

@@ -57,7 +57,12 @@ from .corpus_upgrade import (
     select_corpus_folder,
     upgrade_corpus,
 )
-from .markdown_metadata import enrich_markdown_file, enrich_markdown_text, update_related_papers
+from .markdown_metadata import (
+    enrich_markdown_file,
+    enrich_markdown_text,
+    enrich_reference_markdown_text,
+    update_related_papers,
+)
 from .metadata import PaperMetadata, infer_paper_metadata
 from .naming import infer_paper_identity
 from .obsidian_vault import sync_obsidian_vault
@@ -320,14 +325,27 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--obsidian",
-        action="store_true",
-        help="Añade propiedades Obsidian, wikilink al PDF y relaciones entre papers.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Añade propiedades Obsidian, wikilink al PDF y relaciones entre papers. "
+            "En --upgrade-corpus el default es sí; en extracción normal el default es no."
+        ),
     )
     parser.add_argument(
         "--related-papers",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Con --obsidian, genera hasta 5 enlaces related por tags compartidos.",
+    )
+    parser.add_argument(
+        "--vault",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Con --upgrade-corpus crea un vault administrado. Default: sí, "
+            "en <project>/obsidian-vault."
+        ),
     )
     parser.add_argument(
         "--obsidian-vault",
@@ -1537,7 +1555,16 @@ def finalize_markdown(
             'content: "references-only"\n'
             "---\n\n"
         )
-        write_atomic(refs_path, refs_front + refs_text)
+        refs_output = refs_front + refs_text
+        if metadata_enabled or obsidian:
+            refs_output = enrich_reference_markdown_text(
+                refs_output,
+                paper_id=pdf_path.stem,
+                pdf_name=pdf_path.name,
+                paper_metadata=paper_metadata,
+                obsidian=obsidian,
+            )
+        write_atomic(refs_path, refs_output)
     else:
         stale = refs_dir / f"{pdf_path.stem}.references.md"
         if stale.exists():
@@ -2086,6 +2113,8 @@ def main() -> int:
     args = parse_args()
     if args.obsidian_vault is not None:
         args.obsidian = True
+    elif args.obsidian is None:
+        args.obsidian = False
 
     if args.upgrade_corpus:
         try:
@@ -2101,12 +2130,18 @@ def main() -> int:
             else:
                 corpus_dir = discover_corpus_from_cwd()
 
+            upgrade_obsidian = True if args.obsidian is None else args.obsidian
+            create_vault = True if args.vault is None else args.vault
+            if args.obsidian_vault is not None:
+                create_vault = True
+
             report = upgrade_corpus(
                 corpus_dir,
-                obsidian=args.obsidian,
+                obsidian=upgrade_obsidian,
                 related_papers=args.related_papers,
                 write_pdf_metadata_enabled=args.write_pdf_metadata,
                 obsidian_vault=args.obsidian_vault,
+                create_vault=create_vault,
                 include_references_in_bundle=args.bundle_references,
             )
             print_upgrade_report(report)

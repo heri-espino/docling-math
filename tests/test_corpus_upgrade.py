@@ -84,8 +84,11 @@ def test_upgrade_corpus_migrates_metadata_without_touching_body(tmp_path):
 
     assert report.papers_seen == 1
     assert report.markdown_updated == 1
+    assert report.references_seen == 1
+    assert report.references_updated == 1
     assert report.pdf_metadata_updated == 0
     assert report.missing_pdfs == ()
+    assert report.obsidian_vault == (bib.parent / "obsidian-vault").resolve()
 
     upgraded = (bib / "extracted" / "123.md").read_text(encoding="utf-8")
     front = _front(upgraded)
@@ -99,6 +102,19 @@ def test_upgrade_corpus_migrates_metadata_without_touching_body(tmp_path):
     assert "literature" in front["tags"]
     assert "trend-estimation" in front["tags"]
     assert front["aliases"] == ["Estimacion de tendencia"]
+    assert front["pdf"] == "[[123.pdf]]"
+
+    refs_text = (bib / "references" / "123.references.md").read_text(encoding="utf-8")
+    refs_front = _front(refs_text)
+    assert "Reference A." in refs_text
+    assert refs_front["content"] == "references-only"
+    assert refs_front["paper_id"] == "123"
+    assert refs_front["paper_title"] == "Estimacion de tendencia"
+    assert refs_front["authors"] == ["Daniela Cortes-Toto", "Heriberto Espino"]
+    assert refs_front["year"] == 2011
+    assert "references" in refs_front["tags"]
+    assert refs_front["paper"] == "[[123]]"
+    assert refs_front["pdf"] == "[[123.pdf]]"
 
     index = (bib / "INDEX.md").read_text(encoding="utf-8")
     bundle = (bib / "bundle.md").read_text(encoding="utf-8")
@@ -112,6 +128,15 @@ def test_upgrade_corpus_migrates_metadata_without_touching_body(tmp_path):
     assert len(backups) == 1
     assert (backups[0] / "INDEX.md").read_text(encoding="utf-8") == "# Old index\n"
     assert (backups[0] / "bundle.md").read_text(encoding="utf-8") == "# Old bundle\n"
+    assert (backups[0] / "extracted" / "123.md").read_text(encoding="utf-8") == OLD_MARKDOWN
+    assert "Reference A." in (
+        backups[0] / "references" / "123.references.md"
+    ).read_text(encoding="utf-8")
+
+    vault = bib.parent / "obsidian-vault" / "Literature"
+    assert (vault / "123.md").exists()
+    assert (vault / "References" / "123.references.md").exists()
+    assert (vault / "Attachments" / "PDFs" / "123.pdf").exists()
 
 
 def test_upgrade_with_obsidian_adds_related_without_ocr(tmp_path):
@@ -168,3 +193,51 @@ def test_rebuild_helpers_work_independently(tmp_path):
     assert bundle_path.exists()
     bundle = bundle_path.read_text(encoding="utf-8")
     assert "Reference A." in bundle
+
+
+def test_upgrade_can_disable_default_vault_and_obsidian(tmp_path):
+    bib = _make_old_corpus(tmp_path)
+
+    report = upgrade_corpus(
+        bib,
+        obsidian=False,
+        create_vault=False,
+    )
+
+    assert report.obsidian_vault is None
+    assert not (bib.parent / "obsidian-vault").exists()
+
+    front = _front((bib / "extracted" / "123.md").read_text(encoding="utf-8"))
+    refs_front = _front(
+        (bib / "references" / "123.references.md").read_text(encoding="utf-8")
+    )
+    assert "pdf" not in front
+    assert "paper" not in refs_front
+    assert refs_front["content"] == "references-only"
+
+
+def test_upgrade_migrates_orphan_reference_note(tmp_path):
+    bib = _make_old_corpus(tmp_path)
+    orphan = bib / "references" / "orphan.references.md"
+    orphan.write_text(
+        """---
+id: orphan-references
+source_pdf: ../pdf/orphan.pdf
+---
+# References
+
+Orphan reference content.
+""",
+        encoding="utf-8",
+    )
+
+    report = upgrade_corpus(bib, create_vault=False)
+
+    assert report.references_seen == 2
+    assert report.references_updated == 2
+    text = orphan.read_text(encoding="utf-8")
+    front = _front(text)
+    assert front["id"] == "orphan-references"
+    assert front["paper_id"] == "orphan"
+    assert front["content"] == "references-only"
+    assert "Orphan reference content." in text

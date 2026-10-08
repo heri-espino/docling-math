@@ -4,7 +4,7 @@ from .corpus_upgrade import upgrade_corpus
 from .metadata import PaperMetadata, infer_paper_metadata
 from .rename_literature import rename_literature
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "PaperMetadata",
     "infer_paper_metadata",
