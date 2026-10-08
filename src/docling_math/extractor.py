@@ -320,14 +320,27 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--obsidian",
-        action="store_true",
-        help="Añade propiedades Obsidian, wikilink al PDF y relaciones entre papers.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Añade propiedades Obsidian, wikilink al PDF y relaciones entre papers. "
+            "En --upgrade-corpus el default es sí; en extracción normal el default es no."
+        ),
     )
     parser.add_argument(
         "--related-papers",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Con --obsidian, genera hasta 5 enlaces related por tags compartidos.",
+    )
+    parser.add_argument(
+        "--vault",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Con --upgrade-corpus crea un vault administrado. Default: sí, "
+            "en <project>/obsidian-vault."
+        ),
     )
     parser.add_argument(
         "--obsidian-vault",
@@ -2086,6 +2099,8 @@ def main() -> int:
     args = parse_args()
     if args.obsidian_vault is not None:
         args.obsidian = True
+    elif args.obsidian is None:
+        args.obsidian = False
 
     if args.upgrade_corpus:
         try:
@@ -2101,12 +2116,18 @@ def main() -> int:
             else:
                 corpus_dir = discover_corpus_from_cwd()
 
+            upgrade_obsidian = True if args.obsidian is None else args.obsidian
+            create_vault = True if args.vault is None else args.vault
+            if args.obsidian_vault is not None:
+                create_vault = True
+
             report = upgrade_corpus(
                 corpus_dir,
-                obsidian=args.obsidian,
+                obsidian=upgrade_obsidian,
                 related_papers=args.related_papers,
                 write_pdf_metadata_enabled=args.write_pdf_metadata,
                 obsidian_vault=args.obsidian_vault,
+                create_vault=create_vault,
                 include_references_in_bundle=args.bundle_references,
             )
             print_upgrade_report(report)
