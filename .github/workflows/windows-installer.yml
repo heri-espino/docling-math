@@ -1,0 +1,84 @@
+name: Build Windows desktop installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      torch_backend:
+        description: "PyTorch variant to package"
+        required: true
+        default: cuda
+        type: choice
+        options:
+          - cuda
+          - cpu
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install CPU or CUDA runtime
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ("${{ inputs.torch_backend }}" -eq "cuda") {
+            python -m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+          } else {
+            python -m pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          }
+          python -m pip install --no-cache-dir -e .
+          python -m pip install pyinstaller
+
+      - name: Freeze full desktop app
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name DoclingMath `
+            --hidden-import docling_math.extractor `
+            --hidden-import docling_math.corpus_upgrade `
+            --hidden-import docling_math.rename_literature `
+            --collect-all docling `
+            --collect-all docling_core `
+            --collect-all docling_parse `
+            --collect-all rapidocr `
+            --collect-all transformers `
+            --collect-all huggingface_hub `
+            --collect-all timm `
+            --copy-metadata docling `
+            --copy-metadata docling-core `
+            scripts/desktop_entry.pyw
+
+      - name: Smoke test packaged executable
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\dist\DoclingMath\DoclingMath.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Packaged desktop self-test failed (exit $($p.ExitCode))" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build per-user graphical installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found" }
+          & $iscc "installer\DoclingMath.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: DoclingMath-Windows-${{ inputs.torch_backend }}-installer
+          path: out/DoclingMath-Setup.exe
+          retention-days: 30
+          if-no-files-found: error

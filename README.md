@@ -1,7 +1,7 @@
 # docling-math
 
-High-fidelity academic PDF → Markdown extraction built on Docling, packaged as a small
-Python library with an extraction CLI and a synchronized literature-renaming utility.
+High-fidelity academic PDF → Markdown extraction built on Docling, with a local desktop GUI,
+a Python library, an extraction CLI and a synchronized literature-renaming utility.
 
 The default profile is optimized for mathematics-heavy papers:
 
@@ -15,6 +15,71 @@ The default profile is optimized for mathematics-heavy papers:
 - **no persisted figures or table PNGs by default**.
 
 Use `--assets` only when you want visual fallbacks.
+
+## Desktop application (0.8.0)
+
+Docling Math now includes a native graphical interface. It runs the existing Python/Docling
+engine locally: PDFs and Markdown stay on your computer, and CUDA/MPS is used when available.
+There is no need to use the terminal during day-to-day use.
+
+The application has four tabs:
+
+- **Extract PDFs:** select or create a library, add PDFs, choose compare/smart/OCR, select
+  automatic renaming, metadata, assets and GPU/CPU behavior; then start extraction.
+- **Upgrade library:** update existing extracted papers **and reference Markdown** without
+  OCR, rebuild INDEX/bundle, generate tags and Obsidian vault.
+- **Rename papers:** edit desired filenames visually, preview the coordinated updates,
+  import a JSON mapping, and confirm before applying changes.
+- **Activity:** see processing logs, failures and completion details. Long-running
+  extraction uses a background process and can be cancelled.
+
+A new library is stored as `<chosen folder>/bib/`; opening an existing library supports
+the project root or the `bib/` directory. The GUI uses native folder/file pickers.
+
+### Double-click Windows application (end users)
+
+A manual GitHub Actions workflow is provided to build a Windows installer:
+
+1. Open **Actions → Build Windows desktop installer** in the GitHub repository.
+2. Select **Run workflow**, choose **cuda** for NVIDIA users (or **cpu**).
+3. Once the build passes, download the installer artifact `DoclingMath-Windows-*-installer`.
+4. Run `DoclingMath-Setup.exe` and open **Docling Math** from Start/Desktop.
+
+This is an experimental, unsigned installer build. The full PyTorch/Docling distribution can
+be large; the Windows packaging workflow is manual because it is much heavier than regular
+CI. A green Python test/build run does not by itself prove that a packaged Windows app can
+load all model backends. The Windows workflow includes a packaged launcher smoke test, but
+a real PDF/GPU extraction should also be verified before publishing a general release.
+
+The installer is **per-user** and does not require a separate Conda/Python installation.
+Docling weights download to the user-level cache on first use and are reused later. The
+application itself does not need a web server or GitHub Pages to operate.
+
+### Launch in an existing developer environment
+
+Update your local editable install:
+
+```powershell
+git pull
+python -m pip install -e .
+```
+
+Then open the generated `docling-math-gui.exe` in your environment's `Scripts` folder,
+or run `docling-math-gui` from the environment. It uses a Windows GUI entry point, so it
+does not open its own console window.
+
+If you created your Conda environment from an older environment.yml, install the `tk`
+package into that environment. Fresh environments include it automatically.
+
+### Safe defaults
+
+- A fresh extraction creates or updates the Obsidian vault after conversion.
+- An upgrade updates both `bib/extracted/*.md` and `bib/references/*.references.md`.
+- Writing metadata inside original PDF files remains opt-in.
+- CPU fallback requires an explicit checkbox in the graphical interface.
+- Renaming requires a preview/explicit confirmation and never silently overwrites
+  unrelated targets.
+- Existing CLI and Python APIs remain available unchanged.
 
 ## Repository layout
 
