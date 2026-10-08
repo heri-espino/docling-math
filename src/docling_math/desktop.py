@@ -6,6 +6,7 @@ therefore be tested and used for metadata-only jobs without GPU/model initializa
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import subprocess
@@ -176,17 +177,22 @@ def run_worker(kind: str, args: Sequence[str]) -> int:
     return 2
 
 
-def hidden_process_kwargs(*, allow_cpu: bool = False) -> dict:
-    """Create a streamed child process without opening a Windows console window."""
+def hidden_process_kwargs(*, log_path: str | Path, allow_cpu: bool = False) -> dict:
+    """Spawn a worker without consoles; exchange progress through a UTF-8 log file.
+
+    File-based logging also works when the Windows executable is built in
+    PyInstaller windowed mode, where sys.stdout/sys.stdin can be None.
+    """
     kwargs: dict = {
-        "stdout": subprocess.PIPE,
-        "stderr": subprocess.STDOUT,
-        "stdin": subprocess.PIPE if allow_cpu else subprocess.DEVNULL,
-        "text": True,
-        "encoding": "utf-8",
-        "errors": "replace",
-        "bufsize": 1,
-        "env": {**os.environ, "PYTHONUNBUFFERED": "1"},
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+        "env": {
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "DOCLING_MATH_LOG_FILE": str(Path(log_path).resolve()),
+            "DOCLING_MATH_ALLOW_CPU": "1" if allow_cpu else "0",
+        },
     }
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
@@ -196,6 +202,22 @@ def hidden_process_kwargs(*, allow_cpu: bool = False) -> dict:
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "--docling-math-worker":
+        log_path = os.environ.get("DOCLING_MATH_LOG_FILE")
+        if log_path:
+            with open(log_path, "a", encoding="utf-8", buffering=1) as stream:
+                old_stdout, old_stderr = sys.stdout, sys.stderr
+                original_input = builtins.input
+                try:
+                    sys.stdout = sys.stderr = stream
+                    if os.environ.get("DOCLING_MATH_ALLOW_CPU") == "1":
+                        builtins.input = lambda _prompt="": "y"
+                    if len(args) < 2:
+                        print("Missing worker name.", file=sys.stderr)
+                        return 2
+                    return run_worker(args[1], args[2:])
+                finally:
+                    builtins.input = original_input
+                    sys.stdout, sys.stderr = old_stdout, old_stderr
         if len(args) < 2:
             print("Missing worker name.", file=sys.stderr)
             return 2
