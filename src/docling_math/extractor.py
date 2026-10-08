@@ -57,7 +57,12 @@ from .corpus_upgrade import (
     select_corpus_folder,
     upgrade_corpus,
 )
-from .markdown_metadata import enrich_markdown_file, enrich_markdown_text, update_related_papers
+from .markdown_metadata import (
+    enrich_markdown_file,
+    enrich_markdown_text,
+    enrich_reference_markdown_text,
+    update_related_papers,
+)
 from .metadata import PaperMetadata, infer_paper_metadata
 from .naming import infer_paper_identity
 from .obsidian_vault import sync_obsidian_vault
@@ -1550,7 +1555,16 @@ def finalize_markdown(
             'content: "references-only"\n'
             "---\n\n"
         )
-        write_atomic(refs_path, refs_front + refs_text)
+        refs_output = refs_front + refs_text
+        if metadata_enabled or obsidian:
+            refs_output = enrich_reference_markdown_text(
+                refs_output,
+                paper_id=pdf_path.stem,
+                pdf_name=pdf_path.name,
+                paper_metadata=paper_metadata,
+                obsidian=obsidian,
+            )
+        write_atomic(refs_path, refs_output)
     else:
         stale = refs_dir / f"{pdf_path.stem}.references.md"
         if stale.exists():
