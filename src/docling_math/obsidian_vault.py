@@ -114,6 +114,17 @@ def sync_obsidian_vault(
         notes += 1
         pdfs += 1
 
+    # Copy any split-reference notes that do not have a matching extracted note too.
+    # This keeps the vault mirror complete even for partially migrated/legacy corpora.
+    for refs_path in sorted(refs_dir.glob("*.references.md"), key=lambda p: p.name.casefold()):
+        target = reference_target / refs_path.name
+        if target.exists():
+            continue
+        refs_text = _rewrite_corpus_paths_for_vault(
+            refs_path.read_text(encoding="utf-8", errors="replace")
+        )
+        target.write_text(refs_text, encoding="utf-8")
+
     index_path = bib_dir / "INDEX.md"
     if index_path.exists():
         text = _rewrite_corpus_paths_for_vault(
