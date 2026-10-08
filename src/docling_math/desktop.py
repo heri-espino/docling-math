@@ -224,8 +224,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_worker(args[1], args[2:])
     if args == ["--self-test"]:
         from . import __version__
+        import tkinter
+        import pypdf
+        import yaml
 
-        print(f"Docling Math desktop {__version__}; launcher OK")
+        assert __version__ and tkinter and pypdf and yaml
         return 0
     if args:
         print(f"Unknown arguments: {args}", file=sys.stderr)
