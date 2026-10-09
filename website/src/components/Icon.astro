@@ -1,0 +1,32 @@
+---
+interface Props {
+  name: string;
+  size?: number;
+  strokeWidth?: number;
+}
+const { name, size = 20, strokeWidth = 1.8 } = Astro.props;
+const shapes: Record<string, string> = {
+  github: 'M9 19c-4 1.2-4-2-6-2M15 19c4 1.2 4-2 6-2M9 22v-3.8a4.5 4.5 0 0 1-2.9-4.4c0-2 .8-3.5 2-4.4-.2-.5-.6-2.1.2-3.6 0 0 1.7-.1 3.7 1.7a13 13 0 0 1 4 0c2-1.8 3.7-1.7 3.7-1.7.8 1.5.4 3.1.2 3.6a5.4 5.4 0 0 1 2 4.4 4.5 4.5 0 0 1-2.9 4.4V22M3 16c1.8-.4 3.2.1 4 2',
+  arrow: 'M5 12h14m-6-6 6 6-6 6',
+  arrowDown: 'M12 3v15m-6-6 6 6 6-6M5 21h14',
+  chevronDown: 'm6 9 6 6 6-6',
+  check: 'M20 6 9 17l-5-5',
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6M8 13h8m-8 4h8',
+  code: 'm8 8-4 4 4 4m8-8 4 4-4 4m-5-11-2 14',
+  math: 'M3 7h18M8 4l8 16M15 4 7 20M3 17h18',
+  stack: 'm12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5M3 17l9 5 9-5',
+  network: 'M12 4v5m0 6v5m-7-8h14M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm-7-2a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm14 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z',
+  cloudOff: 'M20 16.6A4.5 4.5 0 0 0 18.1 8a6 6 0 0 0-10.8-1.8M4.4 12a4 4 0 0 0 .6 8h13m-16-17 19 19',
+  cpu: 'M7 3v3m5-3v3m5-3v3M7 18v3m5-3v3m5-3v3M3 7h3m-3 5h3m-3 5h3m12-10h3m-3 5h3m-3 5h3M6 6h12v12H6zM9 9h6v6H9z',
+  tag: 'M20 12 12 20a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3V4h7a2 2 0 0 1 1 .4l9 7.6ZM7 8h.01',
+  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z',
+  refresh: 'M3 11a9 9 0 0 1 15.3-6.4L21 7m0-4v4h-4M21 13a9 9 0 0 1-15.3 6.4L3 17m0 4v-4h4',
+  scan: 'M3 8V5a2 2 0 0 1 2-2h3m8 0h3a2 2 0 0 1 2 2v3m0 8v3a2 2 0 0 1-2 2h-3m-8 0H5a2 2 0 0 1-2-2v-3M3 12h18',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Zm-4-10 3 3 5-5',
+  terminal: 'm4 7 5 5-5 5m8 0h8',
+  sparkle: 'm12 2 2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2L12 2Zm7 16v4m-2-2h4',
+  external: 'M13 5h6v6m0-6-9 9M19 13v6H5V5h6',
+};
+---
+<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width={strokeWidth} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={shapes[name] || shapes.file}/></svg>
