@@ -1,0 +1,62 @@
+name: Website — Build and Pages deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website-pages.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/website-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Astro + Starlight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install web dependencies
+        working-directory: website
+        run: npm install --no-audit --no-fund
+      - name: Build static site
+        working-directory: website
+        run: npm run build
+      - name: Check homepage and documentation paths
+        run: |
+          test -f website/dist/index.html
+          test -f website/dist/docs/index.html
+          test -f website/dist/docs/installation/index.html
+          test -f website/dist/docs/upgrade-corpus/index.html
+          grep -q 'docling-math/' website/dist/index.html
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+  deploy:
+    name: Deploy GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

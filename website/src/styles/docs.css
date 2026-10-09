@@ -1,0 +1,22 @@
+@import '@fontsource-variable/inter';
+
+:root {
+  --sl-font: 'Inter Variable', Inter, sans-serif;
+  --sl-color-accent-low: #f0edff;
+  --sl-color-accent: #5b4bd6;
+  --sl-color-accent-high: #342399;
+  --sl-color-text-accent: #5b4bd6;
+}
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #282043;
+  --sl-color-accent: #a59aff;
+  --sl-color-accent-high: #e0dbff;
+  --sl-color-text-accent: #c0b8ff;
+}
+.site-title {
+  font-weight: 800;
+  letter-spacing: -.045em;
+}
+.hero h1 { letter-spacing: -.055em; }
+.sl-markdown-content code:not(pre code) { border-radius: .3rem; }
+.sl-markdown-content a { text-underline-offset: .2em; }

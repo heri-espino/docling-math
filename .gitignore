@@ -19,6 +19,11 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Website
+website/node_modules/
+website/.astro/
+website/dist/
+
 # Runtime-generated corpus outputs in this tool repository
 bib/extracted/
 bib/references/

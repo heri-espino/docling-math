@@ -16,6 +16,28 @@ The default profile is optimized for mathematics-heavy papers:
 
 Use `--assets` only when you want visual fallbacks.
 
+## Website and documentation
+
+The project website is built with **Astro + Tailwind**, using an AstroWind-inspired
+design, Motion animations, and **Starlight** documentation.
+
+- Website: https://heri-espino.github.io/docling-math/
+- Documentation: https://heri-espino.github.io/docling-math/docs/
+- Source: [website/](website/)
+- Windows installers (when released): [GitHub Releases](https://github.com/heri-espino/docling-math/releases)
+
+The static site is built on pull requests and deployed to GitHub Pages on changes to
+`main`. A repository administrator must select **GitHub Actions** in
+**Settings → Pages → Build and deployment** before the deploy job can publish it.
+
+For local website development:
+
+```bash
+cd website
+npm install
+npm run dev
+```
+
 ## Desktop application (0.8.0)
 
 Docling Math now includes a native graphical interface. It runs the existing Python/Docling

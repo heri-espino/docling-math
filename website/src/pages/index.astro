@@ -1,0 +1,293 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Icon from '../components/Icon.astro';
+
+const base = import.meta.env.BASE_URL;
+const docs = base + 'docs/';
+const releases = 'https://github.com/heri-espino/docling-math/releases';
+const repo = 'https://github.com/heri-espino/docling-math';
+const description = 'Extract scientific PDFs into usable Markdown, mathematical formulas, references and an Obsidian-ready research library. Private, local-first and open source.';
+
+const features = [
+  {
+    icon: 'math', tone: '',
+    title: 'Math that survives conversion',
+    description: 'Preserve LaTeX-style equations and scientific notation with formula enrichment designed for technical papers.',
+    link: 'docs/extraction/',
+  },
+  {
+    icon: 'scan', tone: 'blue',
+    title: 'Tables and complex layouts',
+    description: 'Handle tables, multi-column PDFs and OCR strategies with a fidelity-first extraction pipeline.',
+    link: 'docs/extraction/',
+  },
+  {
+    icon: 'tag', tone: 'mint',
+    title: 'Metadata with meaning',
+    description: 'Author names, titles, DOIs, keywords and normalized tags travel with your literature.',
+    link: 'docs/metadata-obsidian/',
+  },
+  {
+    icon: 'refresh', tone: 'peach',
+    title: 'Upgrade without re-extracting',
+    description: 'Bring older Markdown and reference notes up to date without repeating an expensive OCR pass.',
+    link: 'docs/upgrade-corpus/',
+  },
+  {
+    icon: 'network', tone: 'gray',
+    title: 'Ready for Obsidian',
+    description: 'Build a vault with linked papers, PDFs, reference notes and discoverable relationships.',
+    link: 'docs/metadata-obsidian/',
+  },
+  {
+    icon: 'cpu', tone: '',
+    title: 'Your machine. Your files.',
+    description: 'Process locally with CPU, NVIDIA CUDA or supported accelerators. No cloud upload is required.',
+    link: 'docs/installation/',
+  },
+];
+const process = [
+  { icon: 'file', tone: '', id: '01 · IMPORT', title: 'Choose your PDFs', description: 'Add scientific papers to a library using a simple desktop interface.' },
+  { icon: 'math', tone: 'blue', id: '02 · EXTRACT', title: 'Preserve the structure', description: 'Extract text, equations and tables with the processing strategy you choose.' },
+  { icon: 'network', tone: 'green', id: '03 · CONNECT', title: 'Build your library', description: 'Generate Markdown, metadata, references and an Obsidian-ready vault.' },
+];
+---
+<BaseLayout title="Docling Math — From scientific PDFs to structured knowledge" description={description}>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="shell nav-inner">
+      <a class="brand" href={base} aria-label="Docling Math home">
+        <span class="brand-symbol" aria-hidden="true">∫</span><span>Docling Math</span><sup>beta</sup>
+      </a>
+      <nav class="navlinks" id="mobile-nav" aria-label="Main navigation">
+        <a href="#features">Features</a>
+        <a href="#workflow">How it works</a>
+        <a href="#technology">Why local</a>
+        <a href={docs}>Documentation</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="nav-source" href={repo} target="_blank" rel="noopener noreferrer">
+          <Icon name="github" size={16}/> GitHub <Icon name="external" size={13}/>
+        </a>
+        <button id="menu-toggle" class="nav-menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="mobile-nav">
+          <Icon name="menu" size={20}/>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-heading">
+      <div class="hero-dots" aria-hidden="true"></div>
+      <div class="shell hero-grid">
+        <div class="hero-copy" data-reveal>
+          <span class="eyebrow"><span class="spark"></span> Open source · Local first · Research ready</span>
+          <h1 id="hero-heading">Your papers.<br /><span class="gradient-text">More than text.</span></h1>
+          <p class="hero-description">Turn scientific PDFs into structured Markdown with equations, tables, references and metadata intact — on your own computer.</p>
+          <div class="button-row">
+            <a class="button button-primary" href={releases}><Icon name="arrowDown" size={17}/> View downloads</a>
+            <a class="button button-secondary" href={docs}>Explore the docs <Icon name="arrow" size={16}/></a>
+          </div>
+          <div class="hero-caption">
+            <span><Icon name="check" size={14}/> Free and open source</span>
+            <span><Icon name="shield" size={14}/> Your files stay local</span>
+            <span><Icon name="cpu" size={14}/> CUDA-aware</span>
+          </div>
+        </div>
+
+        <div class="preview-stage" data-reveal aria-label="Illustrative PDF to Markdown conversion preview">
+          <div class="preview-card">
+            <div class="preview-top">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <p>Docling Math · Extraction preview</p>
+            </div>
+            <div class="preview-body">
+              <div class="panel">
+                <div class="panel-header"><span class="file-icon">PDF</span> source.pdf</div>
+                <div class="paper">
+                  <span class="paper-tag">Research paper · Example</span>
+                  <h3>Estimating smooth trends in noisy time series</h3>
+                  <div class="paper-meta">A. Researcher · B. Author · 2026</div>
+                  <div class="paper-line mid"></div><div class="paper-line"></div><div class="paper-line short"></div>
+                  <div class="math-block">ẑ = (I + λQ)<sup>−1</sup>x</div>
+                  <div class="paper-line"></div><div class="paper-line mid"></div><div class="paper-line short"></div>
+                </div>
+              </div>
+              <div class="preview-transfer" aria-hidden="true"><Icon name="arrow" size={17}/></div>
+              <div class="panel code-panel">
+                <div class="panel-header"><Icon name="code" size={17}/> paper.md</div>
+                <div class="code-lines" aria-hidden="true">
+                  <div><span class="dim">---</span></div>
+                  <div><span class="key">title:</span> <span class="str">"Estimating smooth trends"</span></div>
+                  <div><span class="key">year:</span> <span class="warn">2026</span></div>
+                  <div><span class="key">tags:</span> <span class="sym">[time-series, smoothing]</span></div>
+                  <div><span class="dim">---</span></div>
+                  <div>&nbsp;</div>
+                  <div><span class="key">#</span> Estimating smooth trends</div>
+                  <div>&nbsp;</div>
+                  <div><span class="key">##</span> Model</div>
+                  <div><span class="str">$$</span></div>
+                  <div><span class="warn">\hat z=(I+\lambda Q)^{-1}x</span></div>
+                  <div><span class="str">$$</span></div>
+                  <div>&nbsp;</div>
+                  <div><span class="key">##</span> References</div>
+                  <div><span class="dim">[[paper.references]]</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="preview-bottom"><span><span class="status-light"></span> Local processing</span><span>PDF → Markdown + YAML</span></div>
+          </div>
+          <div class="float-badge one"><span class="badge-circle"><Icon name="math" size={17}/></span> Equations preserved</div>
+          <div class="float-badge two"><span class="badge-circle green"><Icon name="check" size={17}/></span> Structured output</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="trust-strip">
+      <div class="shell">
+        <p class="trust-label">Built for the tools researchers already use</p>
+        <div class="trust-pills">
+          <span><Icon name="file" size={20}/> PDF</span>
+          <span><Icon name="math" size={19}/> LaTeX</span>
+          <span><Icon name="code" size={19}/> Markdown</span>
+          <span><Icon name="network" size={20}/> Obsidian</span>
+          <span><Icon name="cpu" size={20}/> CUDA</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-soft" id="features">
+      <div class="shell">
+        <div class="section-heading" data-reveal>
+          <span class="eyebrow"><span class="spark"></span> Everything connected</span>
+          <h2>From a PDF to a<br/><span class="gradient-text">research-ready library.</span></h2>
+          <p>Not just a text converter. A more coherent workflow for your equations, citations, notes and source documents.</p>
+        </div>
+        <div class="cards">
+          {features.map((feature) => (
+            <article class="feature-card" data-reveal>
+              <div class={'feature-icon ' + feature.tone}><Icon name={feature.icon} size={25}/></div>
+              <h3>{feature.title}</h3>
+              <p>{feature.description}</p>
+              <a class="card-arrow" href={base + feature.link}>Read more <Icon name="arrow" size={14}/></a>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="section flow-section" id="workflow">
+      <div class="shell">
+        <div class="section-heading" data-reveal>
+          <span class="eyebrow"><span class="spark"></span> A simple workflow</span>
+          <h2>Less setup.<br/><span class="gradient-text">More thinking.</span></h2>
+          <p>Keep the desktop interface approachable and the more advanced processing controls within reach.</p>
+        </div>
+        <div class="process">
+          {process.map((step) => (
+            <article class="process-step" data-reveal>
+              <div class={'step-icon ' + step.tone}><Icon name={step.icon} size={31}/></div>
+              <div class="step-index">{step.id}</div>
+              <h3>{step.title}</h3>
+              <p>{step.description}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <section class="section deep-section" id="technology">
+      <div class="shell deep-grid">
+        <div class="deep-copy" data-reveal>
+          <span class="eyebrow"><span class="spark"></span> Your research stays yours</span>
+          <h2>Local processing.<br/>Real control.</h2>
+          <p>Docling Math runs the extraction engine on your computer. Choose how to process your PDFs, keep your source documents in place, and reuse downloaded model weights.</p>
+          <div class="deep-points">
+            <div class="deep-point"><Icon name="shield" size={20}/> No required PDF uploads to a hosted service</div>
+            <div class="deep-point"><Icon name="cpu" size={20}/> GPU-first workflows with explicit CPU fallback</div>
+            <div class="deep-point"><Icon name="refresh" size={20}/> Upgrade legacy libraries without OCR</div>
+          </div>
+          <div class="button-row"><a class="button button-secondary" href={docs + 'installation/'}>Installation guide <Icon name="arrow" size={16}/></a></div>
+        </div>
+        <div class="code-showcase" data-reveal>
+          <div class="code-top"><Icon name="terminal" size={17}/> Advanced users · Command line</div>
+          <div class="code-body"><span class="grey"># Extract papers into structured Markdown</span>
+<span class="purple">docling-math</span> <span class="green">--strategy compare</span>
+
+<span class="grey"># Upgrade an existing library without OCR</span>
+<span class="purple">upgrade-corpus</span> <span class="green">--select-folder</span>
+
+<span class="grey"># Optional: write metadata into PDFs</span>
+<span class="purple">upgrade-corpus</span> <span class="yellow">--write-pdf-metadata</span></div>
+          <div class="code-foot"><span><span class="status-light"></span> Same engine behind the GUI</span><span>Local Python</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="get-started">
+      <div class="shell">
+        <div class="callout" data-reveal>
+          <div>
+            <span class="eyebrow"><span class="spark"></span> Start with your next paper</span>
+            <h2>Make your literature<br/>work for you.</h2>
+            <p>Open source, designed for scientific documents. Read the docs or explore the Windows release and installation options.</p>
+          </div>
+          <div class="button-row">
+            <a class="button button-primary" href={releases}><Icon name="arrowDown" size={17}/> Releases</a>
+            <a class="button button-secondary" href={docs}>Documentation <Icon name="arrow" size={16}/></a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="shell foot-inner">
+      <div class="foot-credit">
+        <strong>Docling Math</strong> · Open-source research tooling.<br/>
+        Design inspired by <a href="https://github.com/arthelokyo/astrowind" target="_blank" rel="noopener noreferrer">AstroWind</a>. Documentation built with Starlight.
+      </div>
+      <div class="foot-links">
+        <a href={repo}>GitHub</a>
+        <a href={releases}>Releases</a>
+        <a href={docs}>Docs</a>
+        <a href={repo + '/issues'}>Report an issue</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    import { animate, inView } from 'motion';
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!prefersReducedMotion) {
+      const targets = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
+      targets.forEach((element) => {
+        element.style.opacity = '0';
+        element.style.transform = 'translateY(24px)';
+      });
+      inView(targets, (element) => {
+        animate(element, { opacity: 1, transform: 'translateY(0px)' }, {
+          duration: 0.66,
+          easing: [0.2, 0.72, 0.25, 1],
+        });
+      }, { margin: '0px 0px -12% 0px' });
+    }
+
+    const menu = document.querySelector<HTMLButtonElement>('#menu-toggle');
+    const nav = document.querySelector<HTMLElement>('#mobile-nav');
+    menu?.addEventListener('click', () => {
+      const open = menu.getAttribute('aria-expanded') !== 'true';
+      menu.setAttribute('aria-expanded', String(open));
+      menu.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+      nav?.classList.toggle('is-open', open);
+    });
+    nav?.querySelectorAll('a').forEach((link) => {
+      link.addEventListener('click', () => {
+        nav.classList.remove('is-open');
+        menu?.setAttribute('aria-expanded', 'false');
+        menu?.setAttribute('aria-label', 'Open navigation');
+      });
+    });
+  </script>
+</BaseLayout>
